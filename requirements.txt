@@ -1,0 +1,8 @@
+numpy>=1.26,<2.3
+pandas>=2.1
+scipy>=1.11
+matplotlib>=3.8
+yfinance>=0.2.40
+pytest>=8.0
+jupyter>=1.0
+ipykernel>=6.29
