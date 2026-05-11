@@ -236,6 +236,13 @@ def render() -> None:
             "Slower (~2–5 s), exact for any independent move."
         ),
     )
+    st.sidebar.caption(
+        "_Hosted on Streamlit Cloud free tier (1 GB RAM, shared CPU). "
+        "Cold start serves a pre-built scenario grid and runs Greeks at "
+        "10k MC paths to stay snappy. Switch to \"Precise\" mode for "
+        "20k-path live MC on slider moves; run locally for the full "
+        "13×7×5 grid + 20k Greeks._"
+    )
 
     col_reset, col_rebuild = st.sidebar.columns(2)
     if col_reset.button("Reset to issue", use_container_width=True,
