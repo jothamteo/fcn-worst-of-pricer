@@ -1,3 +1,15 @@
+---
+title: FCN Worst-of Pricer
+emoji: 📈
+colorFrom: blue
+colorTo: indigo
+sdk: streamlit
+sdk_version: 1.57.0
+app_file: app.py
+pinned: false
+license: mit
+---
+
 # Worst-of FCN Pricer (NVDA / AMD / TSM)
 
 > **Disclaimer.** The structure priced in this repository is a **hypothetical, generic Fixed Coupon Note** built for pedagogical purposes. It is not, and is not intended to resemble, any live or recent commercial issuance. All structural parameters (coupon, barriers, tenor, observation frequency) are round textbook numbers drawn from Bouzoubaa & Osseiran, *Exotic Options and Hybrids* (Wiley, 2010), Ch. 12. All market data is sourced from public APIs (yfinance) only.
