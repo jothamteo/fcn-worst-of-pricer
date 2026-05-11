@@ -19,8 +19,8 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Optional, Sequence
+from datetime import date, datetime, timedelta, timezone
+from typing import Optional, Sequence, Union
 
 import numpy as np
 import pandas as pd
@@ -41,14 +41,20 @@ FALLBACK_VOLS: dict[str, float] = {
     "NVDA": 0.45,
     "AMD": 0.50,
     "TSM": 0.32,
+    "AMZN": 0.32,
+    "META": 0.38,
+    "MU": 0.55,
 }
 
 # Continuous dividend yields (decimal). yfinance gives a trailing yield; we use it
 # as-is with a hardcoded backup. AMD pays no dividend.
 FALLBACK_DIVS: dict[str, float] = {
-    "NVDA": 0.0003,  # ~0.03%
+    "NVDA": 0.0003,
     "AMD": 0.0,
-    "TSM": 0.015,    # ~1.5%
+    "TSM": 0.015,
+    "AMZN": 0.0,
+    "META": 0.0035,
+    "MU": 0.005,
 }
 
 # 1Y US Treasury yield as of the date stamp — used only when yfinance ^IRX/^FVX both fail.
@@ -123,18 +129,39 @@ class MarketData:
 # --------------------------------------------------------------------------------------
 
 
-def _download_history(tickers: Sequence[str], lookback_years: int = 5) -> pd.DataFrame:
-    """Pull daily Close history for the basket. Returns a wide DataFrame."""
-    period = f"{lookback_years}y"
-    raw = yf.download(
-        list(tickers),
-        period=period,
-        interval="1d",
-        auto_adjust=True,
-        progress=False,
-        group_by="ticker",
-        threads=True,
-    )
+def _download_history(
+    tickers: Sequence[str],
+    lookback_years: int = 5,
+    end: Optional[date] = None,
+) -> pd.DataFrame:
+    """Pull daily Close history for the basket. Returns a wide DataFrame.
+
+    When `end` is supplied, history is restricted to dates strictly on or before
+    `end` so realised stats are computed without look-ahead bias.
+    """
+    if end is None:
+        raw = yf.download(
+            list(tickers),
+            period=f"{lookback_years}y",
+            interval="1d",
+            auto_adjust=True,
+            progress=False,
+            group_by="ticker",
+            threads=True,
+        )
+    else:
+        start = end - timedelta(days=int(round(lookback_years * 365.25)))
+        # yfinance `end` is exclusive — add a day so the as-of close itself is included.
+        raw = yf.download(
+            list(tickers),
+            start=start.isoformat(),
+            end=(end + timedelta(days=1)).isoformat(),
+            interval="1d",
+            auto_adjust=True,
+            progress=False,
+            group_by="ticker",
+            threads=True,
+        )
     if raw is None or raw.empty:
         raise RuntimeError(
             "yfinance returned no history for "
@@ -149,6 +176,13 @@ def _download_history(tickers: Sequence[str], lookback_years: int = 5) -> pd.Dat
     else:
         closes = raw[["Close"]].rename(columns={"Close": tickers[0]})
     closes = closes.dropna(how="all").ffill().dropna()
+    if end is not None:
+        # Belt-and-braces: drop any rows past the as-of date in case yfinance
+        # returned an extra bar (timezones, weekend handling).
+        end_ts = pd.Timestamp(end)
+        if closes.index.tz is not None:
+            end_ts = end_ts.tz_localize(closes.index.tz)
+        closes = closes.loc[closes.index <= end_ts]
     if closes.empty:
         raise RuntimeError("Downloaded history is empty after cleaning.")
     return closes
@@ -341,13 +375,62 @@ def _dividend_yield(ticker: str) -> Optional[float]:
     return None
 
 
-def _risk_free_rate() -> tuple[float, str]:
-    """1Y US Treasury yield (decimal). Returns (rate, source_string)."""
+def _trailing_dividend_yield(
+    ticker: str,
+    as_of: date,
+    spot: float,
+    window_days: int = 365,
+) -> Optional[float]:
+    """Trailing 12M dividend yield at `as_of`, decimal form.
+
+    Sum of cash dividends with ex-date in `(as_of - window_days, as_of]`,
+    divided by spot. Returns None when the dividend series is empty
+    (and the caller should fall through to the hardcoded fallback).
+    """
+    try:
+        divs = yf.Ticker(ticker).dividends
+    except Exception as exc:
+        logger.warning("Ticker.dividends failed for %s: %s", ticker, exc)
+        return None
+    if divs is None or divs.empty:
+        return None
+    if getattr(divs.index, "tz", None) is not None:
+        divs = divs.tz_convert(None)
+    end_ts = pd.Timestamp(as_of)
+    start_ts = end_ts - pd.Timedelta(days=window_days)
+    window = divs.loc[(divs.index > start_ts) & (divs.index <= end_ts)]
+    if window.empty:
+        return 0.0
+    if spot <= 0:
+        return None
+    y = float(window.sum()) / spot
+    return y if 0.0 <= y <= 0.20 else None
+
+
+def _risk_free_rate(
+    as_of: Optional[date] = None,
+    target_T: float = 1.0,
+) -> tuple[float, str]:
+    """US Treasury yield interpolated to `target_T` years (decimal). Returns
+    (rate, source_string).
+
+    When `as_of` is None, the most recent close of each tenor is used. When
+    `as_of` is supplied, the close on or immediately before `as_of` is used,
+    so historical pricing has no look-ahead.
+    """
     candidates = [("^IRX", 13 / 52), ("^FVX", 5.0)]
     yields: list[tuple[float, float]] = []
     for symbol, tenor_y in candidates:
         try:
-            hist = yf.Ticker(symbol).history(period="5d", interval="1d")
+            if as_of is None:
+                hist = yf.Ticker(symbol).history(period="5d", interval="1d")
+            else:
+                start = as_of - timedelta(days=10)
+                hist = yf.Ticker(symbol).history(
+                    start=start.isoformat(),
+                    end=(as_of + timedelta(days=1)).isoformat(),
+                    interval="1d",
+                )
         except Exception as exc:
             logger.warning("Treasury fetch failed for %s: %s", symbol, exc)
             continue
@@ -355,18 +438,22 @@ def _risk_free_rate() -> tuple[float, str]:
             continue
         last = float(hist["Close"].dropna().iloc[-1]) / 100.0
         yields.append((tenor_y, last))
+    label_suffix = "" if as_of is None else f" (as_of {as_of.isoformat()})"
     if len(yields) >= 2:
-        # Linear interpolate to T=1Y.
+        # Linear interpolate to T=target_T.
         yields.sort()
         t0, y0 = yields[0]
         t1, y1 = yields[1]
         if t0 == t1:
-            return y0, f"yfinance {candidates[0][0]} (single point @ {t0:.2f}y)"
-        rate = y0 + (y1 - y0) * (1.0 - t0) / (t1 - t0)
-        return rate, f"yfinance interpolated {candidates[0][0]}/{candidates[1][0]} -> 1Y"
+            return y0, f"yfinance {candidates[0][0]} (single point @ {t0:.2f}y){label_suffix}"
+        rate = y0 + (y1 - y0) * (target_T - t0) / (t1 - t0)
+        return rate, (
+            f"yfinance interpolated {candidates[0][0]}/{candidates[1][0]} -> "
+            f"{target_T:.2f}Y{label_suffix}"
+        )
     if len(yields) == 1:
-        return yields[0][1], f"yfinance single tenor @ {yields[0][0]:.2f}y"
-    return FALLBACK_RATE, f"hardcoded fallback (date {FALLBACK_RATE_DATE})"
+        return yields[0][1], f"yfinance single tenor @ {yields[0][0]:.2f}y{label_suffix}"
+    return FALLBACK_RATE, f"hardcoded fallback (date {FALLBACK_RATE_DATE}){label_suffix}"
 
 
 # --------------------------------------------------------------------------------------
@@ -378,6 +465,7 @@ def load_market_data(
     tickers: Sequence[str] = ("NVDA", "AMD", "TSM"),
     lookback_years: int = 5,
     target_T: float = 1.0,
+    as_of: Optional[Union[date, str]] = None,
 ) -> MarketData:
     """Pull a full MarketData snapshot for the basket.
 
@@ -388,50 +476,78 @@ def load_market_data(
     lookback_years : int
         Years of daily history used for realised stats.
     target_T : float
-        Target option tenor for ATM IV calibration. Defaults to 1Y to match the FCN.
+        Target option tenor for ATM IV calibration *and* the risk-free rate
+        interpolation target. Defaults to 1Y.
+    as_of : date | str, optional
+        When supplied, pricing inputs are taken as of this historical date:
+          - history is restricted to dates ≤ `as_of` (no look-ahead),
+          - spot is the last close on or before `as_of`,
+          - vol is realised (yfinance does not expose historical IV chains),
+          - dividend yield is the trailing 12M sum / spot,
+          - risk-free rate is the Treasury yield curve on `as_of`.
+        When None, the current snapshot is used (live IV calibration is run).
 
     Returns
     -------
     MarketData
     """
-    history = _download_history(tickers, lookback_years=lookback_years)
+    if isinstance(as_of, str):
+        as_of = datetime.fromisoformat(as_of).date()
+
+    history = _download_history(tickers, lookback_years=lookback_years, end=as_of)
     realised_vols, corr = realised_stats(history)
 
     spots = history.iloc[-1].reindex(tickers).to_numpy(dtype=float)
-    rate, rate_src = _risk_free_rate()
+    rate, rate_src = _risk_free_rate(as_of=as_of, target_T=target_T)
 
     divs = np.empty(len(tickers))
     div_sources: list[str] = []
     for i, t in enumerate(tickers):
-        d = _dividend_yield(t)
+        if as_of is None:
+            d = _dividend_yield(t)
+            src_label = "yfinance Ticker.info"
+        else:
+            d = _trailing_dividend_yield(t, as_of=as_of, spot=float(spots[i]))
+            src_label = f"trailing 12M dividends / spot @ {as_of.isoformat()}"
         if d is None:
             divs[i] = FALLBACK_DIVS.get(t, 0.0)
             div_sources.append(f"{t}: hardcoded fallback ({divs[i]:.4f})")
         else:
             divs[i] = d
-            div_sources.append(f"{t}: yfinance Ticker.info ({d:.4f})")
+            div_sources.append(f"{t}: {src_label} ({d:.4f})")
 
     vols = np.empty(len(tickers))
     vol_sources: list[str] = []
     for i, t in enumerate(tickers):
-        iv = _atm_implied_vol(t, spot=float(spots[i]), rate=rate, div=float(divs[i]), target_T=target_T)
+        # Historical IV chains are not available via yfinance, so for as_of mode
+        # we skip the live IV calibration and use realised vol directly.
+        iv: Optional[float] = None
+        if as_of is None:
+            iv = _atm_implied_vol(
+                t, spot=float(spots[i]), rate=rate, div=float(divs[i]), target_T=target_T
+            )
         if iv is not None:
             vols[i] = iv
             vol_sources.append(f"{t}: yfinance ATM IV ({iv:.4f})")
         else:
-            # Use realised as a first fallback (usually closer than the hardcoded textbook
-            # vol), and only fall through to hardcoded when realised is unavailable too.
             rv = float(realised_vols[i])
             if rv > 0:
                 vols[i] = rv
-                vol_sources.append(f"{t}: realised 5Y vol ({rv:.4f}) — IV chain empty")
+                if as_of is None:
+                    vol_sources.append(f"{t}: realised {lookback_years}Y vol ({rv:.4f}) — IV chain empty")
+                else:
+                    vol_sources.append(
+                        f"{t}: realised {lookback_years}Y vol ({rv:.4f}) @ {as_of.isoformat()}"
+                    )
             else:
                 vols[i] = FALLBACK_VOLS.get(t, 0.30)
                 vol_sources.append(f"{t}: hardcoded fallback ({vols[i]:.4f})")
 
+    as_of_label = "live" if as_of is None else as_of.isoformat()
     sources = {
-        "spots": "yfinance daily closes (last bar)",
-        "history": f"yfinance {lookback_years}Y daily closes",
+        "as_of": as_of_label,
+        "spots": f"yfinance daily closes (last bar on or before {as_of_label})",
+        "history": f"yfinance {lookback_years}Y daily closes ending {as_of_label}",
         "realised_vols": "log-return std × √252",
         "implied_vols": "; ".join(vol_sources),
         "dividends": "; ".join(div_sources),
