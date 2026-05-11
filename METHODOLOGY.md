@@ -75,27 +75,59 @@ For the single-asset case the value $V(S, t)$ satisfies
 
 $$\frac{\partial V}{\partial t} + \tfrac{1}{2}\sigma^2 S^2 \frac{\partial^2 V}{\partial S^2} + (r - q) S \frac{\partial V}{\partial S} - r V = 0,$$
 
-solved backward from $T$ to $0$.
+solved backward from the final valuation date $t_M$ to the issue date.
+
+### Log-spot transformation
+
+We solve in $x = \log(S/S_0)$, which removes the $S$-dependence from the
+diffusion and convection coefficients:
+
+$$\frac{\partial V}{\partial t} + \tfrac{1}{2}\sigma^2 \frac{\partial^2 V}{\partial x^2} + (r - q - \tfrac{1}{2}\sigma^2)\frac{\partial V}{\partial x} - r V = 0.$$
+
+A uniform $x$-grid then translates into exponentially-stretched $S$
+spacing — denser in the low-$S$ region where the strike and knock-in sit.
+That's the cheap, clean alternative to a sinh-stretched grid in $S$.
 
 ### Discretisation
 
-- Non-uniform space grid concentrated near the barriers $\{B_{ki}\,S_0,\, B_c\,S_0,\, B_{ac}\,S_0\}$ via a sinh-stretched mapping.
-- Crank–Nicolson in time with $\theta = 1/2$, giving $O(\Delta t^2 + \Delta S^2)$ accuracy and unconditional A-stability.
-- Tridiagonal system solved via Thomas algorithm each step.
+- Uniform $x$-grid on $[-x_{\max}, +x_{\max}]$ with $x_{\max} = k\,\sigma\sqrt{T}$, typically $k = 6$.
+- Central differences in $x$ for both $\partial_x$ and $\partial_{xx}$.
+- Crank–Nicolson in time with $\theta = 1/2$, giving $O(\Delta t^2 + \Delta x^2)$ accuracy and A-stability.
+- Tridiagonal system per step, solved via scipy's banded LAPACK driver.
 
 ### Boundary conditions
 
-- $S \to 0$: $V \to 0$ (no recovery on zero spot, with knock-in already breached).
-- $S \to S_{\max}$: linear extrapolation $V_{S\to S_{\max}} = N$ (autocall absorbs).
+Linear extrapolation at both ends, i.e. $V_{xx} = 0$ at $x = \pm x_{\max}$.
+With $x_{\max} = 6\sigma\sqrt{T}$ both boundaries are well outside the
+support of the payoff distribution, so the choice of boundary policy has
+no measurable effect on the at-the-money price. The substitution
+$V_{\text{new}}[0] = 2 V_{\text{new}}[1] - V_{\text{new}}[2]$ folds into
+the row-$1$ equation of the tridiagonal system, and analogously at the
+right end.
 
-### Discrete observation dates
+### Discrete observation events
 
-Between observations, evolve the PDE freely. At each observation date $t_j$ (walking backward we hit them after they have been "applied" forward in real time), we modify the in-grid values:
+The terminal condition is imposed at $t = t_M$ (final valuation), not at the
+maturity payment date. The cashflow at the payment date $T_{\text{pay},M}$
+is locked in by $S(t_M)$, so we set
 
-- If $S \ge B_{ac} S_0$: replace $V(S, t_j^-)$ with $N + c$ (autocall, terminate locally).
-- Otherwise add the conditional coupon: $V(S, t_j^-) \mathrel{+}= c \cdot \mathbb{1}\{S \ge B_c S_0\}$.
+$$V(S, t_M) = \big[R(S) + c_M(S)\big]\cdot e^{-r(T_{\text{pay},M} - t_M)},$$
 
-For the European knock-in variant we apply the maturity payoff at $t_M$ and then evolve back.
+where $R(S) = N$ if $S/S_0 \ge B_{ki}$ and $R(S) = N \cdot S/S_0$ otherwise
+(non-geared), and $c_M(S)$ is the final coupon (flat or conditional on
+$S/S_0 \ge B_c$). Walking backward, between consecutive autocall fixings
+the PDE evolves freely. At each autocall observation $t_j$, $j < n_{ac}$:
+
+- **Autocall region** ($S/S_0 \ge B_{ac}$): replace $V(S, t_j^-)$ with
+  $(N + c_j(S))\cdot e^{-r(T_{\text{pay},j} - t_j)}$ — the note dies, the
+  cashflow is deterministic.
+- **Continuation region** ($S/S_0 < B_{ac}$): add the coupon,
+  $V(S, t_j^-) \mathrel{+}= c \cdot e^{-r(T_{\text{pay},j} - t_j)} \cdot \mathbb{1}\{S/S_0 \ge B_c\}$
+  (or unconditionally for flat coupons).
+
+The price at issue is $V(0, t=0)$, read off the grid by interpolation at
+$x = 0$. With the snap-to-zero grid construction this is just an exact
+lookup at the central node.
 
 ## 5. Greeks
 
