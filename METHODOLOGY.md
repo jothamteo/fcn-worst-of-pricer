@@ -155,6 +155,24 @@ with $\Phi$ the maturity payoff. The pathwise estimator does not work at the dis
 
 Vega and pairwise correlation sensitivities are computed by re-Cholesky-ing $\Sigma$ on each bump and re-driving the simulation with the same underlying $\eta$. This isolates the parameter perturbation cleanly.
 
+### 5.4 Smoothed-payoff Greeks (production-desk fix)
+
+Bump-and-revalue Greeks fail across the autocall and knock-in barriers because the hard payoff is discontinuous in the underlyings — a $\pm\epsilon$ bump occasionally flips a path between two qualitatively different resolution regimes, and the per-path payoff difference becomes much larger than the parameter sensitivity itself. CRN cannot remove this: the discontinuity is in the payoff, not in the sampling noise.
+
+The standard production fix is to replace every hard indicator in the payoff with a logistic sigmoid of controllable steepness $k$:
+
+$$\mathbb{1}\{W \ge B\} \;\longrightarrow\; \sigma\!\left(\frac{k\,(W - B)}{B}\right), \qquad \sigma(x) = \frac{1}{1 + e^{-x}}.$$
+
+Barriers are normalised by $B$ so the same $k$ corresponds to the same *relative* transition width regardless of barrier level. The autocall becomes a *soft* event: at observation $j$ the path autocalls with probability $p_j = \sigma(k_{ac}\,(W_j - B_{ac})/B_{ac})$, and the survival probability propagates multiplicatively across observation dates. Cashflows are then probability-weighted:
+
+- Coupon at obs $j$ = $c \cdot b_j \cdot s_{j-1}$, where $s_{j-1}$ is the survival probability into obs $j$ and $b_j$ is the smoothed coupon-barrier indicator.
+- Autocall redemption at obs $j$ (autocallable) = $N \cdot p_j \cdot s_{j-1}$.
+- Maturity redemption at obs $M-1$ = $\big[N\,(1 - \pi_{ki}) + \text{downside}\cdot \pi_{ki}\big]\cdot s_{M-1}$, with $\pi_{ki}$ the smoothed KI-breach probability.
+
+The smoothed payoff is C¹ in spots, vols and correlations, so the bump-and-revalue gradient becomes continuous in $\epsilon$ and the central-difference Δ/Γ estimators no longer pick up indicator-flip noise. As $k\to\infty$ the smoothed payoff converges pointwise to the hard payoff; at finite $k$ the price picks up an $O(1/k)$ bias.
+
+**Operational use.** Report the *hard* price on the trade ticket, but compute Greeks using the smoothed payoff. They are independent estimators — the smoothed estimator is biased on the central value but has dramatically lower variance for the gradient. Notebook 08 verifies that on the textbook product at $k = 100$ the price bias is $\sim 0.04\%$ of notional (well within hard-MC SE) while the worst-case Γ standard error tightens by roughly $8\times$. The transition width of the sigmoid is then $\sim 1\%$ of barrier in each direction — just wider than the 1% spot bump used to compute the Greek, so the bump never straddles the discontinuity.
+
 ## 6. References
 
 - Glasserman, P. (2003). *Monte Carlo Methods in Financial Engineering*, Ch. 2 (variance reduction), Ch. 7 (sensitivity estimation).

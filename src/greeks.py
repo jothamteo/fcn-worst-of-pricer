@@ -39,6 +39,7 @@ from .fcn_payoff import (
     FCNProduct,
     ObservationGrid,
     payoff_per_path,
+    payoff_per_path_smoothed,
 )
 from .gbm_simulation import SimulationConfig, draw_normals, simulate_paths
 from .market_data import MarketData
@@ -129,6 +130,7 @@ def _price_with_overrides(
     vols: Optional[np.ndarray] = None,
     corr: Optional[np.ndarray] = None,
     antithetic: bool = True,
+    smoothing: Optional[dict] = None,
 ) -> tuple[float, float, np.ndarray]:
     r"""Re-price the FCN reusing pre-drawn `normals` with optional bumped inputs.
 
@@ -143,6 +145,12 @@ def _price_with_overrides(
     only the simulation's starting point — i.e. *today's spot*. We therefore
     pass `spots=spots_use` into the simulator but always pass
     `market.spots` (un-bumped) into the payoff function.
+
+    **Smoothing.** If `smoothing` is a dict with keys
+    ``{"k_ac", "k_ki", "k_coupon"}`` (any subset; defaults fill the rest), the
+    payoff is computed via :func:`payoff_per_path_smoothed` — the sigmoid
+    replacement of the hard indicators, used for stable bump Greeks across
+    the barrier regions. Without `smoothing`, the hard payoff is used.
     """
     spots_use = market.spots if spots is None else spots
     vols_use = market.vols if vols is None else vols
@@ -166,10 +174,19 @@ def _price_with_overrides(
     # NB: use the *un-bumped* initial fixing as the payoff's normalisation —
     # see the spot-bump semantics note above. Only the simulation start has
     # moved.
-    pv = payoff_per_path(
-        paths=paths, spots=np.asarray(market.spots, dtype=float),
-        product=product, grid=grid, rate=market.rate,
-    )
+    if smoothing is None:
+        pv = payoff_per_path(
+            paths=paths, spots=np.asarray(market.spots, dtype=float),
+            product=product, grid=grid, rate=market.rate,
+        )
+    else:
+        pv = payoff_per_path_smoothed(
+            paths=paths, spots=np.asarray(market.spots, dtype=float),
+            product=product, grid=grid, rate=market.rate,
+            smoothing_k_ac=float(smoothing.get("k_ac", 100.0)),
+            smoothing_k_ki=float(smoothing.get("k_ki", 100.0)),
+            smoothing_k_coupon=float(smoothing.get("k_coupon", 100.0)),
+        )
     n_total = pv.shape[0]
     return float(pv.mean()), float(pv.std(ddof=1) / np.sqrt(n_total)), pv
 
@@ -184,6 +201,7 @@ def mc_greeks_bump(
     vol_bump_abs: float = 0.01,
     corr_bump_abs: float = 0.05,
     day_count: float = 365.0,
+    smoothing: Optional[dict] = None,
 ) -> GreekResult:
     r"""Compute (Δ, Γ, vega, ρ_pair) by bump-and-revalue MC under CRN.
 
@@ -208,6 +226,13 @@ def mc_greeks_bump(
         re-project the bumped correlation matrix onto the PSD cone if needed.
     day_count : float
         ACT/`day_count`.
+    smoothing : dict, optional
+        If provided, replace the hard autocall/KI/coupon indicators with
+        sigmoids of the given steepness — keys ``"k_ac"``, ``"k_ki"``,
+        ``"k_coupon"`` (any subset; defaults to 100 each). Use to obtain
+        clean Δ/Γ across the barrier regions where the hard payoff's
+        discontinuities create bump-and-revalue noise. See
+        :func:`fcn_payoff.payoff_per_path_smoothed`.
 
     Returns
     -------
@@ -218,7 +243,7 @@ def mc_greeks_bump(
     normals = draw_normals(n_paths=n_paths, n_steps=grid.sim_n_steps, d=len(market.spots), rng=rng)
 
     base_price, base_se, base_pv = _price_with_overrides(
-        market, product, grid, normals, antithetic=antithetic
+        market, product, grid, normals, antithetic=antithetic, smoothing=smoothing,
     )
 
     d = len(market.spots)
@@ -240,10 +265,12 @@ def mc_greeks_bump(
         spots_up = spots.copy(); spots_up[i] += eps
         spots_dn = spots.copy(); spots_dn[i] -= eps
         p_up, se_up, pv_up = _price_with_overrides(
-            market, product, grid, normals, spots=spots_up, antithetic=antithetic
+            market, product, grid, normals, spots=spots_up,
+            antithetic=antithetic, smoothing=smoothing,
         )
         p_dn, se_dn, pv_dn = _price_with_overrides(
-            market, product, grid, normals, spots=spots_dn, antithetic=antithetic
+            market, product, grid, normals, spots=spots_dn,
+            antithetic=antithetic, smoothing=smoothing,
         )
         delta[i] = (p_up - p_dn) / (2.0 * eps)
         gamma[i] = (p_up - 2.0 * base_price + p_dn) / (eps * eps)
@@ -260,10 +287,12 @@ def mc_greeks_bump(
         vols_up = vols.copy(); vols_up[i] += vol_bump_abs
         vols_dn = vols.copy(); vols_dn[i] -= vol_bump_abs
         p_up, _, pv_up = _price_with_overrides(
-            market, product, grid, normals, vols=vols_up, antithetic=antithetic
+            market, product, grid, normals, vols=vols_up,
+            antithetic=antithetic, smoothing=smoothing,
         )
         p_dn, _, pv_dn = _price_with_overrides(
-            market, product, grid, normals, vols=vols_dn, antithetic=antithetic
+            market, product, grid, normals, vols=vols_dn,
+            antithetic=antithetic, smoothing=smoothing,
         )
         vega[i] = (p_up - p_dn) / (2.0 * vol_bump_abs)
         diff_v = (pv_up - pv_dn) / (2.0 * vol_bump_abs)
@@ -280,10 +309,12 @@ def mc_greeks_bump(
             corr_up = np.clip(corr_up, -0.999, 0.999); np.fill_diagonal(corr_up, 1.0)
             corr_dn = np.clip(corr_dn, -0.999, 0.999); np.fill_diagonal(corr_dn, 1.0)
             p_up, _, pv_up = _price_with_overrides(
-                market, product, grid, normals, corr=corr_up, antithetic=antithetic
+                market, product, grid, normals, corr=corr_up,
+                antithetic=antithetic, smoothing=smoothing,
             )
             p_dn, _, pv_dn = _price_with_overrides(
-                market, product, grid, normals, corr=corr_dn, antithetic=antithetic
+                market, product, grid, normals, corr=corr_dn,
+                antithetic=antithetic, smoothing=smoothing,
             )
             rho_pair[i, j] = (p_up - p_dn) / (2.0 * corr_bump_abs)
             rho_pair[j, i] = rho_pair[i, j]
@@ -313,7 +344,7 @@ def mc_greeks_bump(
             "rho_pair": se_rho,
         },
         diagnostics={
-            "engine": "mc_bump_crn",
+            "engine": "mc_bump_crn" if smoothing is None else "mc_bump_crn_smoothed",
             "tickers": list(market.tickers),
             "spots": spots.tolist(),
             "spot_bump_rel": spot_bump_rel,
@@ -322,6 +353,7 @@ def mc_greeks_bump(
             "n_paths_total": 2 * n_paths if antithetic else n_paths,
             "antithetic": antithetic,
             "seed": seed,
+            "smoothing": smoothing,
         },
     )
 
@@ -427,6 +459,7 @@ def mc_delta_curve(
     seed: Optional[int] = None,
     spot_bump_rel: float = 0.01,
     day_count: float = 365.0,
+    smoothing: Optional[dict] = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     r"""Sweep the MC Δ for one underlying across a range of *its* spot.
 
@@ -449,15 +482,78 @@ def mc_delta_curve(
         spots_up = spots_base.copy(); spots_up[asset_index] += eps
         spots_dn = spots_base.copy(); spots_dn[asset_index] -= eps
         _, _, pv_up = _price_with_overrides(
-            market, product, grid, normals, spots=spots_up, antithetic=antithetic
+            market, product, grid, normals, spots=spots_up,
+            antithetic=antithetic, smoothing=smoothing,
         )
         _, _, pv_dn = _price_with_overrides(
-            market, product, grid, normals, spots=spots_dn, antithetic=antithetic
+            market, product, grid, normals, spots=spots_dn,
+            antithetic=antithetic, smoothing=smoothing,
         )
         diff = (pv_up - pv_dn) / (2.0 * eps)
         deltas[k] = float(diff.mean())
         delta_ses[k] = float(diff.std(ddof=1) / np.sqrt(diff.shape[0]))
     return deltas, delta_ses
+
+
+def mc_delta_gamma_curve(
+    market: MarketData,
+    product: FCNProduct,
+    spot_grid: np.ndarray,
+    asset_index: int = 0,
+    n_paths: int = 40_000,
+    antithetic: bool = True,
+    seed: Optional[int] = None,
+    spot_bump_rel: float = 0.01,
+    day_count: float = 365.0,
+    smoothing: Optional[dict] = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    r"""Sweep MC Δ *and* Γ for one underlying across `spot_grid`.
+
+    Three-point stencil per spot under CRN. Used in notebook 08 to demonstrate
+    that the smoothed-payoff Γ is stable across the barrier regions where the
+    hard-payoff Γ is dominated by indicator-flip noise. Pass
+    ``smoothing={"k_ac": ..., "k_ki": ..., "k_coupon": ...}`` to use the
+    smoothed payoff; pass ``None`` for the hard payoff.
+
+    Returns ``(deltas, delta_ses, gammas, gamma_ses)``, each of shape
+    ``spot_grid.shape``.
+    """
+    grid = ObservationGrid.from_product(product=product, day_count=day_count)
+    rng = np.random.default_rng(seed)
+    normals = draw_normals(
+        n_paths=n_paths, n_steps=grid.sim_n_steps, d=len(market.spots), rng=rng,
+    )
+
+    deltas = np.zeros_like(spot_grid, dtype=float)
+    delta_ses = np.zeros_like(spot_grid, dtype=float)
+    gammas = np.zeros_like(spot_grid, dtype=float)
+    gamma_ses = np.zeros_like(spot_grid, dtype=float)
+    for k, s_target in enumerate(spot_grid):
+        spots_base = np.array(market.spots, dtype=float)
+        spots_base[asset_index] = float(s_target)
+        eps = spot_bump_rel * float(s_target)
+        spots_up = spots_base.copy(); spots_up[asset_index] += eps
+        spots_dn = spots_base.copy(); spots_dn[asset_index] -= eps
+        _, _, pv_0 = _price_with_overrides(
+            market, product, grid, normals, spots=spots_base,
+            antithetic=antithetic, smoothing=smoothing,
+        )
+        _, _, pv_up = _price_with_overrides(
+            market, product, grid, normals, spots=spots_up,
+            antithetic=antithetic, smoothing=smoothing,
+        )
+        _, _, pv_dn = _price_with_overrides(
+            market, product, grid, normals, spots=spots_dn,
+            antithetic=antithetic, smoothing=smoothing,
+        )
+        diff_d = (pv_up - pv_dn) / (2.0 * eps)
+        diff_g = (pv_up - 2.0 * pv_0 + pv_dn) / (eps * eps)
+        n_total = pv_up.shape[0]
+        deltas[k] = float(diff_d.mean())
+        delta_ses[k] = float(diff_d.std(ddof=1) / np.sqrt(n_total))
+        gammas[k] = float(diff_g.mean())
+        gamma_ses[k] = float(diff_g.std(ddof=1) / np.sqrt(n_total))
+    return deltas, delta_ses, gammas, gamma_ses
 
 
 def pde_delta_curve(
@@ -485,3 +581,32 @@ def pde_delta_curve(
         )
         out[k] = float(g.delta[0])
     return out
+
+
+def pde_delta_gamma_curve(
+    vol: float,
+    div: float,
+    rate: float,
+    product: FCNProduct,
+    spot_grid: np.ndarray,
+    n_space: int = 1600,
+    n_time_per_period: int = 160,
+    x_range_sigma: float = 6.0,
+    day_count: float = 365.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    r"""Sweep PDE Δ *and* Γ across spot — the smooth reference for notebook 08.
+
+    Returns `(deltas, gammas)`, each of shape `spot_grid.shape`. We re-grid
+    for each spot to keep the grid centred on the new $S$.
+    """
+    deltas = np.zeros_like(spot_grid, dtype=float)
+    gammas = np.zeros_like(spot_grid, dtype=float)
+    for k, s in enumerate(spot_grid):
+        g = pde_greeks_1d(
+            spot=float(s), vol=vol, div=div, rate=rate, product=product,
+            n_space=n_space, n_time_per_period=n_time_per_period,
+            x_range_sigma=x_range_sigma, day_count=day_count,
+        )
+        deltas[k] = float(g.delta[0])
+        gammas[k] = float(g.gamma[0])
+    return deltas, gammas

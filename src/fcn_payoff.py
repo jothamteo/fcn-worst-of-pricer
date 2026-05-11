@@ -332,6 +332,156 @@ def payoff_per_path(
 
 
 # --------------------------------------------------------------------------------------
+# Smoothed payoff (sigmoid replacements for the autocall / KI / coupon indicators)
+# --------------------------------------------------------------------------------------
+
+
+def _stable_sigmoid(x: np.ndarray) -> np.ndarray:
+    """Numerically stable σ(x) = 1 / (1 + exp(-x))."""
+    out = np.empty_like(x, dtype=float)
+    pos = x >= 0
+    neg = ~pos
+    out[pos] = 1.0 / (1.0 + np.exp(-x[pos]))
+    ex = np.exp(x[neg])
+    out[neg] = ex / (1.0 + ex)
+    return out
+
+
+def payoff_per_path_smoothed(
+    paths: np.ndarray,
+    spots: np.ndarray,
+    product: FCNProduct,
+    grid: ObservationGrid,
+    rate: float,
+    smoothing_k_ac: float = 100.0,
+    smoothing_k_ki: float = 100.0,
+    smoothing_k_coupon: float = 100.0,
+) -> np.ndarray:
+    r"""Smoothed-indicator variant of :func:`payoff_per_path` for stable Greeks.
+
+    Every hard indicator in the FCN payoff is replaced by a logistic sigmoid::
+
+        1{W ≥ B}  →  σ(k · (W − B) / B)
+        1{W < B}  →  σ(k · (B − W) / B)
+
+    The barrier is normalised by ``B`` so the same ``k`` corresponds to roughly
+    the same *relative* transition width regardless of barrier level.
+
+    The autocall is treated as a *soft* event: at observation ``j`` the path
+    autocalls with probability ``p_j = σ(k_ac · (W_j − B_ac) / B_ac)``, and the
+    survival probability through obs ``j`` propagates multiplicatively across
+    observation dates. Cashflows are then probability-weighted:
+
+    * Coupon at obs ``j`` = ``c · b_j · s_{j−1}``  (``s_{j−1}`` = survival into
+      obs ``j``; ``b_j`` = smoothed coupon-barrier indicator, or 1 if no coupon
+      barrier is set).
+    * Autocall redemption at obs ``j`` = ``N · p_j · s_{j−1}``.
+    * Maturity redemption at obs ``M−1`` =
+      ``[N · (1 − π_ki) + downside · π_ki] · s_{M−1}``,
+      with ``π_ki`` the smoothed KI-breach probability.
+
+    As ``smoothing_k → ∞`` the smoothed payoff converges pointwise to the hard
+    payoff (this is verified in :mod:`tests.test_smoothed_payoff`). At finite
+    ``k`` the *price* picks up a small O(1/k) bias, but the gradient w.r.t.
+    spots/vols/correlation becomes continuous — which is what makes
+    bump-and-revalue Greeks stable across the barrier regions where the hard
+    payoff's discontinuities create the noise visible in notebook 05.
+
+    Parameters
+    ----------
+    paths, spots, product, grid, rate :
+        As in :func:`payoff_per_path`.
+    smoothing_k_ac, smoothing_k_ki, smoothing_k_coupon : float
+        Steepness of the sigmoid for the autocall, knock-in, and (if applicable)
+        coupon-barrier indicators. Larger ``k`` → tighter transition → smaller
+        price bias but more curvature, i.e. larger Γ noise away from the
+        barrier; smaller ``k`` → smoother gradients but larger price bias.
+        Defaults of 100 give a transition width of ~1% of barrier on each side
+        and a price bias well within MC standard error at the textbook fixings.
+
+    Returns
+    -------
+    pv : (n_paths,) array
+        Discounted total cashflow per path (smoothed).
+    """
+    if paths.ndim != 3:
+        raise ValueError(f"paths must be 3D, got shape {paths.shape}")
+    n_paths, n_grid, d = paths.shape
+    if n_grid != grid.sim_n_steps + 1:
+        raise ValueError(
+            f"paths has {n_grid} grid points; expected {grid.sim_n_steps + 1}"
+        )
+    if spots.shape != (d,):
+        raise ValueError(f"spots shape {spots.shape} != ({d},)")
+    if smoothing_k_ac <= 0 or smoothing_k_ki <= 0 or smoothing_k_coupon <= 0:
+        raise ValueError("smoothing_k_* must be strictly positive")
+
+    M = product.n_obs
+    n_ac = int(product.n_autocall_obs)
+    N = float(product.notional)
+    c = float(product.coupon_rate) * N
+
+    obs_prices = paths[:, grid.obs_indices, :]
+    perf = obs_prices / spots
+    W = perf.min(axis=2)                                  # (n_paths, M)
+    df = np.exp(-rate * grid.pay_year_fractions)          # (M,)
+
+    B_ac = float(product.autocall_barrier)
+
+    # Soft autocall probabilities at every autocallable obs.
+    if n_ac > 0:
+        p_ac = _stable_sigmoid(smoothing_k_ac * (W[:, :n_ac] - B_ac) / B_ac)
+    else:
+        p_ac = np.zeros((n_paths, 0))
+
+    # Survival into obs j: s_at_start[:, 0] = 1; s_at_start[:, j] propagates
+    # via the autocallable obs and stays flat thereafter (only the last obs
+    # is then the maturity check).
+    s_at_start = np.ones((n_paths, M))
+    for j in range(1, M):
+        if j - 1 < n_ac:
+            s_at_start[:, j] = s_at_start[:, j - 1] * (1.0 - p_ac[:, j - 1])
+        else:
+            s_at_start[:, j] = s_at_start[:, j - 1]
+
+    # Coupon CFs: at every obs j, c · (smoothed coupon-barrier ind) · s_{j-1}.
+    if product.coupon_barrier is None:
+        coupon_b = np.ones((n_paths, M))
+    else:
+        Bc = float(product.coupon_barrier)
+        coupon_b = _stable_sigmoid(smoothing_k_coupon * (W - Bc) / Bc)
+    coupon_cf = c * coupon_b * s_at_start                  # (n_paths, M)
+
+    # Autocall redemption CFs at each autocallable obs.
+    redemption_cf = np.zeros((n_paths, M))
+    if n_ac > 0:
+        redemption_cf[:, :n_ac] = N * s_at_start[:, :n_ac] * p_ac
+
+    # Maturity redemption at obs M-1 (smoothed KI vs no-KI mixture).
+    if M - 1 >= n_ac:
+        if product.continuous_ki:
+            path_min_perf = (paths / spots).min(axis=2).min(axis=1)
+            ki_prob = _stable_sigmoid(
+                smoothing_k_ki * (product.strike - path_min_perf) / product.strike
+            )
+        else:
+            ki_prob = _stable_sigmoid(
+                smoothing_k_ki * (product.strike - W[:, -1]) / product.strike
+            )
+        W_final = W[:, -1]
+        if product.geared_downside:
+            downside_payoff = N * W_final / product.strike
+        else:
+            downside_payoff = N * W_final
+        mat_redemption = (1.0 - ki_prob) * N + ki_prob * downside_payoff
+        redemption_cf[:, -1] = redemption_cf[:, -1] + mat_redemption * s_at_start[:, -1]
+
+    cf = coupon_cf + redemption_cf
+    pv = (cf * df[None, :]).sum(axis=1)
+    return pv
+
+
+# --------------------------------------------------------------------------------------
 # Probability decomposition (diagnostics)
 # --------------------------------------------------------------------------------------
 

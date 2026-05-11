@@ -35,7 +35,7 @@ See `METHODOLOGY.md` for formal payoff notation. Reference: Bouzoubaa & Osseiran
 | Monte Carlo (3-asset) | main pricer | Path-dependent, multi-underlying, discrete observations — the natural fit. |
 | Crank–Nicolson PDE (1D) | cross-validation | On a single underlying the FCN is 1D, and a PDE gives smooth Greeks and a benchmark MC must agree with. |
 
-Variance reduction in MC: antithetic variates + a worst-of European put control variate.
+Variance reduction in MC: antithetic variates + a worst-of European put control variate. For Greeks, the payoff's hard autocall / knock-in indicators can be replaced with sigmoids of controllable steepness — a small price bias buys substantially tighter Γ standard errors at the barriers (see notebook 08).
 
 ## Key results
 
@@ -76,14 +76,20 @@ P(par at maturity, no AC) ≈ 30%.
 
 ## Honest findings
 
-- **MC bump-and-revalue Greeks blow up at the barriers.** Near
-  `S/S₀ = 1.00` (autocall) and `S/S₀ = 0.70` (KI) the bump
-  occasionally flips a path between two qualitatively different
-  resolution regimes, creating a discontinuous payoff difference that
-  CRN cannot smooth over. The Δ-vs-spot plot (notebook 05) shows the
-  MC ribbon widening visibly at exactly those levels while the PDE
-  curve stays smooth. A production desk would use a smoothed-payoff
-  variant (sigmoid in place of the autocall indicator) for clean Γ.
+- **MC bump-and-revalue Greeks blow up at the barriers — and Phase 8
+  fixes it.** Near `S/S₀ = 1.00` (autocall) and `S/S₀ = 0.70` (KI) the
+  hard-payoff bump occasionally flips a path between two qualitatively
+  different resolution regimes, creating a discontinuous payoff
+  difference that CRN cannot smooth over. The Δ-vs-spot plot
+  (notebook 05) shows the MC ribbon widening visibly at exactly those
+  levels. The production-desk fix is to **replace each indicator with a
+  logistic sigmoid** of controllable steepness, so the autocall becomes
+  a soft event and survival probability propagates across observations.
+  At `k = 100` on the textbook product, the smoothed price bias is
+  ~0.04% of notional (<0.5 hard-MC SE) and the worst-case Γ standard
+  error is **~8× tighter** than the hard estimator. The Γ-vs-spot scan
+  (notebook 08) lands inside a tight band on the PDE benchmark across
+  the full spot range.
 
 - **The worst-of put control variate exploits exactly the loss tail.**
   CV correlation reaches −0.84, giving 3.4× variance reduction
@@ -102,8 +108,9 @@ P(par at maturity, no AC) ≈ 30%.
   constant correlation matrix, European KI only on the PDE side
   (continuous-KI is supported in MC but would need an absorbing
   boundary along the strike in the PDE — not implemented; see
-  METHODOLOGY §4). The "Honest findings" plots in notebook 05 are
-  deliberately not tuned away.
+  METHODOLOGY §4). The Phase 5 "MC noise at the barriers" plots are
+  deliberately not tuned away — Phase 8 (notebook 08) then closes the
+  gap with the smoothed-payoff fix.
 
 ## How to run
 
