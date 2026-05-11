@@ -2,6 +2,19 @@
 
 > **Disclaimer.** The structure priced in this repository is a **hypothetical, generic Fixed Coupon Note** built for pedagogical purposes. It is not, and is not intended to resemble, any live or recent commercial issuance. All structural parameters (coupon, barriers, tenor, observation frequency) are round textbook numbers drawn from Bouzoubaa & Osseiran, *Exotic Options and Hybrids* (Wiley, 2010), Ch. 12. All market data is sourced from public APIs (yfinance) only.
 
+## Live demo
+
+Interactive dashboard (Streamlit): **[link pending deploy]**
+
+Move the market sliders in the sidebar; the five panels — P&L attribution, per-name Greeks, scenario stress, hedging summary, and price-curve slice — reprice the trade through the same MC + PDE engines used in the notebooks. First paint takes ~45s (the engine builds a scenario grid and computes initial Greeks); subsequent slider moves are sub-100ms via grid interpolation.
+
+To run locally:
+
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
+
 ## What this is
 
 A from-scratch Python implementation of a **worst-of Fixed Coupon Note** pricer on a 3-name semiconductor basket (NVDA, AMD, TSM). Pricing is done by Monte Carlo on correlated GBM, cross-validated against a 1D Crank–Nicolson PDE on a reduced single-asset case. Greeks are computed by bump-and-revalue with common random numbers. Everything (GBM engine, Cholesky correlation, antithetic + control variates, FCN payoff, PDE scheme) is written in NumPy — no QuantLib, no FinancePy.

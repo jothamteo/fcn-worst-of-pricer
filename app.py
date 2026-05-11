@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import streamlit as st
 
+from dashboard.engine import warmup_engine
 from dashboard.state import init_session_state
 from dashboard.styles import (
     inject_css,
@@ -92,6 +93,8 @@ st.caption(
 
 render_what_is_an_fcn()
 trade_config.render()
+
+warmup_engine()
 
 tab_pnl, tab_greeks, tab_scenarios, tab_hedge, tab_curve = st.tabs(
     ["P&L", "Greeks", "Scenarios", "Hedging", "Price curve"]

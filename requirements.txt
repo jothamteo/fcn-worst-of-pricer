@@ -1,8 +1,15 @@
+# Runtime dependencies — pricer + dashboard.
+# Single file so Streamlit Community Cloud picks it up automatically.
+# Dev-only deps (pytest, jupyter) live in requirements-dev.txt.
+
 numpy>=1.26,<2.3
 pandas>=2.1
 scipy>=1.11
 matplotlib>=3.8
 yfinance>=0.2.40
-pytest>=8.0
-jupyter>=1.0
-ipykernel>=6.29
+
+# Dashboard
+streamlit>=1.36
+plotly>=5.22
+pyarrow>=15.0
+joblib>=1.4

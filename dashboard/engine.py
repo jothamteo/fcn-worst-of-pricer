@@ -35,7 +35,12 @@ from dashboard.state import MarketSnapshot
 # ---------------------------------------------------------------------------
 
 
-def ensure_grid(*, force: bool = False, high_res: Optional[bool] = None) -> ScenarioGrid:
+def ensure_grid(
+    *,
+    force: bool = False,
+    high_res: Optional[bool] = None,
+    progress_cb=None,
+) -> ScenarioGrid:
     """Return the cached grid, building it if missing.
 
     Parameters
@@ -47,6 +52,10 @@ def ensure_grid(*, force: bool = False, high_res: Optional[bool] = None) -> Scen
         If False or None, build the small ``GridAxes.fast()`` grid (~10s) —
         this is the first-load default so the page paints quickly. The
         sidebar's "Rebuild grid (high-res)" button promotes to the full grid.
+    progress_cb : callable, optional
+        ``(done, total)`` callback. When omitted, a sidebar progress bar is
+        used (for ad-hoc rebuilds). When provided, the caller controls the
+        UI — used by :func:`warmup_engine` to drive a top-of-page bar.
     """
     cached = st.session_state.get("scenario_grid")
     if cached is not None and not force:
@@ -61,18 +70,52 @@ def ensure_grid(*, force: bool = False, high_res: Optional[bool] = None) -> Scen
     axes = GridAxes.default() if high_res else GridAxes.fast()
     n_paths = 8_000 if high_res else 4_000
 
-    progress = st.sidebar.progress(0.0, text="Building scenario grid…")
+    local_bar = None
+    if progress_cb is None:
+        local_bar = st.sidebar.progress(0.0, text="Building scenario grid…")
 
-    def _cb(done: int, total_: int) -> None:
-        progress.progress(done / max(total_, 1), text=f"Grid {done}/{total_}…")
+        def progress_cb(done: int, total_: int) -> None:  # type: ignore[misc]
+            local_bar.progress(done / max(total_, 1), text=f"Grid {done}/{total_}…")
 
     grid = build_scenario_grid(
         initial=initial, product=product, axes=axes,
-        n_paths=n_paths, progress_cb=_cb,
+        n_paths=n_paths, progress_cb=progress_cb,
     )
-    progress.empty()
+    if local_bar is not None:
+        local_bar.empty()
     st.session_state["scenario_grid"] = grid
     return grid
+
+
+def warmup_engine() -> None:
+    """Pre-build grid + initial Greeks behind a single top-of-page progress bar.
+
+    Idempotent: if both are cached already, returns immediately. Called once
+    on cold start from ``app.py`` so the first paint shows one clean loading
+    bar (~45s) instead of two staggered pop-ins as panels render.
+    """
+    grid_cached = st.session_state.get("scenario_grid") is not None
+    greeks_cached = st.session_state.get("initial_full_state") is not None
+    if grid_cached and greeks_cached:
+        return
+
+    bar = st.progress(0.0, text="Loading pricer engine — first paint takes ~45s…")
+    try:
+        if not grid_cached:
+            def _grid_cb(done: int, total_: int) -> None:
+                frac = done / max(total_, 1)
+                bar.progress(
+                    0.05 + 0.65 * frac,
+                    text=f"Building scenario grid ({done}/{total_} cells)…",
+                )
+
+            ensure_grid(progress_cb=_grid_cb)
+        bar.progress(0.75, text="Computing initial Greeks (Monte Carlo, 20k paths)…")
+        if not greeks_cached:
+            initial_greeks()
+        bar.progress(1.0, text="Ready.")
+    finally:
+        bar.empty()
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +167,9 @@ def initial_greeks() -> dict:
     if cached is not None:
         return cached
     initial = st.session_state["initial"]
-    out = precise_greeks(initial, st.session_state["product"], n_paths=40_000, seed=20260101)
+    # 20k paths keeps peak memory under ~150 MB so the 1 GB Streamlit Cloud
+    # container has headroom. SE ~sqrt(2)× worse than 40k — negligible at the
+    # linearisation point.
+    out = precise_greeks(initial, st.session_state["product"], n_paths=20_000, seed=20260101)
     st.session_state["initial_full_state"] = out
     return out

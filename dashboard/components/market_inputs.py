@@ -245,8 +245,10 @@ def render() -> None:
     if col_rebuild.button("Rebuild grid (high-res)", use_container_width=True,
                           help=(
                               "Force-rebuild the scenario grid at full resolution "
-                              "(~100s, 13×7×5 cells). The default first-load grid is "
-                              "a coarser 7×4×3 build (~10s)."
+                              "(~100s, 13×7×5 cells, ~800 MB peak memory). The "
+                              "default first-load grid is a coarser 7×4×3 build "
+                              "(~10s). On the free Streamlit Cloud tier (1 GB RAM) "
+                              "this can OOM — run locally for the high-res grid."
                           )):
         st.session_state["scenario_grid"] = None
         st.session_state["grid_high_res"] = True
