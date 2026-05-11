@@ -16,7 +16,7 @@ license: mit
 
 ## Live demo
 
-Interactive dashboard (Streamlit): **[link pending deploy]**
+Interactive dashboard (Streamlit): **https://fcn-worst-of-pricer.streamlit.app/**
 
 Move the market sliders in the sidebar; the five panels — P&L attribution, per-name Greeks, scenario stress, hedging summary, and price-curve slice — reprice the trade through the same MC + PDE engines used in the notebooks. Cold start loads a pre-built scenario grid from `dashboard/grid_initial.npz` (no MC at startup) and runs a one-shot 10k-path MC Greeks pass for the linearisation point — typically under ~10s on Streamlit Cloud. Subsequent slider moves are sub-100ms via grid interpolation. If you change the defaults in `dashboard/state.py`, rebuild the shipped grid with `python scripts/build_initial_grid.py`.
 
