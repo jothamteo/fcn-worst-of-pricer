@@ -24,7 +24,9 @@ Hedge tabs need them, which keeps grid build time roughly one minute.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -61,10 +63,18 @@ class GridAxes:
 
     @classmethod
     def fast(cls) -> "GridAxes":
-        """A smaller grid for the smoke-test path (faster build)."""
+        """A smaller grid for the smoke-test / cold-start path.
+
+        ``7 × 4 × 3 = 84`` cells was the original; this is the leaner
+        ``5 × 3 × 3 = 45`` cell variant used when the shipped grid is
+        missing or stale and we still want a sub-30 s cold start on
+        Streamlit Cloud's shared CPU. Linear interpolation across this
+        coarser grid is fine for the visualisation; "Precise" mode is
+        still available for exact values.
+        """
         return cls(
-            basket_spot_shift=np.round(np.arange(-0.30, 0.30 + 1e-9, 0.10), 4),
-            basket_vol_shift=np.round(np.arange(-0.10, 0.20 + 1e-9, 0.10), 4),
+            basket_spot_shift=np.round(np.arange(-0.30, 0.30 + 1e-9, 0.15), 4),
+            basket_vol_shift=np.array([-0.10, 0.0, 0.10]),
             corr_shift=np.array([-0.10, 0.0, 0.10]),
         )
 
@@ -314,6 +324,94 @@ def precise_price(
         antithetic=True, seed=seed,
     )
     return result.price, result.standard_error
+
+
+# ---------------------------------------------------------------------------
+# Persistence — ship a pre-built grid in the repo to skip the cold-start build
+# ---------------------------------------------------------------------------
+
+
+def snapshot_fingerprint(snap: MarketSnapshot, product: FCNProduct) -> str:
+    """Stable hex digest of the inputs that determine a grid's contents.
+
+    Two grids with the same fingerprint are interchangeable; a mismatch
+    means the shipped file no longer matches the live ``initial`` snapshot
+    and we must rebuild.
+    """
+    h = hashlib.sha256()
+    for arr in (snap.spots, snap.vols, snap.divs, snap.corr):
+        h.update(np.ascontiguousarray(arr, dtype=np.float64).tobytes())
+    h.update(np.float64(snap.rate).tobytes())
+    h.update(",".join(snap.tickers).encode())
+    # Product fields that change the payoff
+    h.update(np.float64(product.notional).tobytes())
+    h.update(np.float64(product.coupon_rate).tobytes())
+    h.update(np.float64(product.autocall_barrier).tobytes())
+    h.update(np.float64(product.strike).tobytes())
+    h.update(str(product.issue_date).encode())
+    h.update(",".join(str(d) for d in product.obs_dates).encode())
+    return h.hexdigest()[:16]
+
+
+def save_grid_npz(grid: ScenarioGrid, path: Path) -> None:
+    """Persist a ScenarioGrid to disk.
+
+    Only the price tensor + axes + a fingerprint of the inputs are saved.
+    The MarketSnapshot itself isn't serialised — the live snapshot from
+    ``state.py`` is the source of truth at load time.
+    """
+    fp = snapshot_fingerprint(grid.initial, grid.product)
+    np.savez_compressed(
+        path,
+        price=grid.price,
+        basket_spot_shift=grid.axes.basket_spot_shift,
+        basket_vol_shift=grid.axes.basket_vol_shift,
+        corr_shift=grid.axes.corr_shift,
+        fingerprint=np.array(fp),
+        diagnostics_keys=np.array(list(grid.diagnostics.keys()), dtype=object),
+        diagnostics_vals=np.array(
+            [str(v) for v in grid.diagnostics.values()], dtype=object
+        ),
+    )
+
+
+def load_grid_npz(
+    path: Path,
+    *,
+    initial: MarketSnapshot,
+    product: FCNProduct,
+) -> Optional[ScenarioGrid]:
+    """Load a shipped grid if the fingerprint matches the current inputs.
+
+    Returns ``None`` if the file is missing or stale — callers should fall
+    back to building a fresh grid in that case.
+    """
+    if not path.exists():
+        return None
+    expected = snapshot_fingerprint(initial, product)
+    with np.load(path, allow_pickle=True) as data:
+        stored_fp = str(data["fingerprint"])
+        if stored_fp != expected:
+            return None
+        axes = GridAxes(
+            basket_spot_shift=np.array(data["basket_spot_shift"]),
+            basket_vol_shift=np.array(data["basket_vol_shift"]),
+            corr_shift=np.array(data["corr_shift"]),
+        )
+        price = np.array(data["price"])
+        diag = {}
+        if "diagnostics_keys" in data:
+            keys = data["diagnostics_keys"]
+            vals = data["diagnostics_vals"]
+            diag = {str(k): str(v) for k, v in zip(keys, vals)}
+        diag["loaded_from"] = str(path)
+    return ScenarioGrid(
+        axes=axes,
+        initial=initial,
+        product=product,
+        price=price,
+        diagnostics=diag,
+    )
 
 
 def precise_greeks(

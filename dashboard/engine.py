@@ -15,6 +15,7 @@ so we keep it in ``st.session_state`` rather than in ``st.cache_*``.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -24,10 +25,17 @@ from dashboard.precompute import (
     GridAxes,
     ScenarioGrid,
     build_scenario_grid,
+    load_grid_npz,
     precise_greeks,
     precise_price,
 )
 from dashboard.state import MarketSnapshot
+
+
+# Shipped pre-computed grid (built once locally, committed to the repo).
+# When fingerprint matches the live initial snapshot, we skip the build
+# entirely — cold-start drops from ~30 s to ~3 s on Streamlit Cloud.
+_SHIPPED_GRID_PATH = Path(__file__).parent / "grid_initial.npz"
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +75,18 @@ def ensure_grid(
     if high_res is None:
         high_res = bool(st.session_state.get("grid_high_res", False))
 
+    # Fast path: load the shipped grid if its fingerprint matches the
+    # live initial snapshot. The shipped file is the default-axes
+    # high-res grid, so we can serve "Fast" mode straight from it
+    # without doing any MC at all on cold start.
+    if not force and not high_res:
+        shipped = load_grid_npz(
+            _SHIPPED_GRID_PATH, initial=initial, product=product,
+        )
+        if shipped is not None:
+            st.session_state["scenario_grid"] = shipped
+            return shipped
+
     axes = GridAxes.default() if high_res else GridAxes.fast()
     n_paths = 8_000 if high_res else 4_000
 
@@ -99,7 +119,7 @@ def warmup_engine() -> None:
     if grid_cached and greeks_cached:
         return
 
-    bar = st.progress(0.0, text="Loading pricer engine — first paint takes ~45s…")
+    bar = st.progress(0.0, text="Loading pricer engine…")
     try:
         if not grid_cached:
             def _grid_cb(done: int, total_: int) -> None:
@@ -110,7 +130,7 @@ def warmup_engine() -> None:
                 )
 
             ensure_grid(progress_cb=_grid_cb)
-        bar.progress(0.75, text="Computing initial Greeks (Monte Carlo, 20k paths)…")
+        bar.progress(0.75, text="Computing initial Greeks (Monte Carlo, 10k paths)…")
         if not greeks_cached:
             initial_greeks()
         bar.progress(1.0, text="Ready.")
@@ -167,9 +187,9 @@ def initial_greeks() -> dict:
     if cached is not None:
         return cached
     initial = st.session_state["initial"]
-    # 20k paths keeps peak memory under ~150 MB so the 1 GB Streamlit Cloud
-    # container has headroom. SE ~sqrt(2)× worse than 40k — negligible at the
-    # linearisation point.
-    out = precise_greeks(initial, st.session_state["product"], n_paths=20_000, seed=20260101)
+    # 10k paths keeps peak memory well under 100 MB and cuts the cold-start
+    # Greeks pass roughly in half on Streamlit Cloud's shared CPU. SE is
+    # ~1.4× worse than 20k — negligible at the linearisation point.
+    out = precise_greeks(initial, st.session_state["product"], n_paths=10_000, seed=20260101)
     st.session_state["initial_full_state"] = out
     return out
