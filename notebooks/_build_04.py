@@ -162,8 +162,8 @@ basket loader returned), price the FCN with **both** engines, and report
 the headline `|PDE − MC| / SE` figure.
 
 - MC: 80,000 antithetic primal paths (160k effective), seed 20260511.
-- PDE: 800 space intervals × ~80 time steps per period × 5 inter-event
-  segments ≈ 400 total CN sub-steps."""
+- PDE: 1600 space intervals × 160 time steps per period × 5 inter-event
+  segments ≈ 800 total CN sub-steps."""
 )
 code(
     """def _single_asset_market(spot, vol, div, rate):
@@ -190,7 +190,7 @@ for i, name in enumerate(TICKERS):
     t0 = time.perf_counter()
     pde_i = price_fcn_pde_1d(
         spot=spot_i, vol=vol_i, div=div_i, rate=market.rate, product=product,
-        n_space=800, n_time_per_period=80, x_range_sigma=6.0,
+        n_space=1600, n_time_per_period=160, x_range_sigma=6.0,
     )
     pde_runtime = time.perf_counter() - t0
 
