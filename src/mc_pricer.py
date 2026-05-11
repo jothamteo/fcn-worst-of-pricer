@@ -4,6 +4,16 @@ Composes `MarketData` (from `market_data.py`), an `FCNProduct` (from
 `fcn_payoff.py`), and the GBM engine (`gbm_simulation.py`) into a single
 `price_fcn(...)` call. Returns a `PricingResult` with the discounted MC mean,
 its standard error, and a probability decomposition over how paths resolved.
+
+Variance reduction:
+* **Antithetic variates** — always on by default; doubles the effective path
+  count for free.
+* **Worst-of European put control variate** — opt-in via
+  `control_variate='worst_of_put'`. The control variate is a European put
+  on the worst-of basket struck at the FCN's KI level. Because the FCN's
+  downside risk comes from exactly this event (KI breached at maturity),
+  the CV is strongly correlated with the FCN PV in the loss tail — which
+  is where the FCN's variance lives. See METHODOLOGY §2.2.
 """
 
 from __future__ import annotations
@@ -54,6 +64,7 @@ class PricingResult:
     probability: ProbabilityDecomposition
     pv_samples: np.ndarray = field(repr=False)
     diagnostics: dict = field(default_factory=dict)
+    cv_diagnostics: Optional[dict] = None
 
     def summary(self) -> str:
         lines = [
@@ -63,12 +74,88 @@ class PricingResult:
             "",
             str(self.probability),
         ]
+        if self.cv_diagnostics is not None:
+            cv = self.cv_diagnostics
+            lines.append("")
+            lines.append("Control variate (worst-of European put):")
+            lines.append(
+                f"  β̂           : {cv['beta_hat']:,.4f}   "
+                f"(corr(X, Y) = {cv['rho_XY']:+.4f})"
+            )
+            lines.append(
+                f"  Ê[Y]        : {cv['EY_hat']:,.4f} ± {cv['EY_se']:.4f}  "
+                f"(pre-pass n = {cv['n_paths_for_ey']:,})"
+            )
+            lines.append(
+                f"  Price w/o CV: {cv['price_no_cv']:,.4f} ± {cv['se_no_cv']:.4f}"
+            )
+            lines.append(
+                f"  Price w/  CV: {cv['price_cv']:,.4f} ± {cv['se_cv']:.4f}"
+            )
+            lines.append(
+                f"  Var(X) / Var(X_cv): {cv['var_reduction_ratio']:.2f}× "
+                f"  (SE ratio: {np.sqrt(cv['var_reduction_ratio']):.2f}×)"
+            )
         if self.diagnostics:
             lines.append("")
             lines.append("Diagnostics:")
             for k, v in self.diagnostics.items():
                 lines.append(f"  {k}: {v}")
         return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------------------
+# Worst-of European put — used as the control variate
+# --------------------------------------------------------------------------------------
+
+
+def _worst_of_european_put_pv(
+    paths: np.ndarray,
+    spots: np.ndarray,
+    strike_perf: float,
+    rate: float,
+    notional: float,
+    T_pay: float,
+) -> np.ndarray:
+    r"""Per-path discounted payoff of a worst-of European put.
+
+    Payoff: $N \cdot \max(K - W(T), 0)$ where $W(T) = \min_i S_i(T)/S_i(0)$
+    and $K$ is the put strike *in performance units* (e.g. 0.70). Notional
+    matches the FCN's notional so the CV scales naturally. Discounted from
+    the payment date `T_pay` back to issue.
+    """
+    W_T = (paths[:, -1, :] / spots).min(axis=1)         # (n_paths,)
+    intrinsic = np.maximum(strike_perf - W_T, 0.0)
+    return notional * intrinsic * float(np.exp(-rate * T_pay))
+
+
+def _worst_of_european_put_expectation(
+    market: MarketData,
+    product: FCNProduct,
+    n_paths: int,
+    antithetic: bool,
+    seed: int,
+    day_count: float,
+) -> tuple[float, float]:
+    """Pre-pass MC estimate of $\\mathbb{E}[Y]$ for the CV.
+
+    Returns `(mean, std_error)`. Run with a separate seed (and typically more
+    paths) so the result is independent of the main pricing sample.
+    """
+    grid = ObservationGrid.from_product(product=product, day_count=day_count)
+    cfg = SimulationConfig(
+        spots=market.spots, vols=market.vols, divs=market.divs, rate=market.rate,
+        corr=market.corr, T=grid.sim_T, n_steps=grid.sim_n_steps, n_paths=n_paths,
+        antithetic=antithetic, seed=seed,
+    )
+    paths = simulate_paths(cfg)
+    y = _worst_of_european_put_pv(
+        paths=paths, spots=cfg.spots, strike_perf=product.strike,
+        rate=market.rate, notional=product.notional,
+        T_pay=float(grid.pay_year_fractions[-1]),
+    )
+    n_total = y.shape[0]
+    return float(y.mean()), float(y.std(ddof=1) / np.sqrt(n_total))
 
 
 def price_fcn(
@@ -79,6 +166,9 @@ def price_fcn(
     seed: Optional[int] = None,
     sim_n_steps: Optional[int] = None,
     day_count: float = 365.0,
+    control_variate: Optional[str] = None,
+    cv_n_paths_for_ey: int = 200_000,
+    cv_seed_offset: int = 7919,
 ) -> PricingResult:
     """Price a worst-of FCN by Monte Carlo on correlated GBM.
 
@@ -102,6 +192,20 @@ def price_fcn(
         day so every observation date lands exactly on a grid point.
     day_count : float
         ACT/`day_count` day-count basis for year fractions. Default 365.
+    control_variate : {'worst_of_put', None}, optional
+        If `'worst_of_put'`, the pricer also computes the worst-of
+        European put struck at `product.strike` (the KI level) on each
+        path, estimates β̂ = Cov(X,Y)/Var(Y) in-sample, and reports the
+        CV-adjusted price + variance reduction ratio in
+        `result.cv_diagnostics`. $\\mathbb{E}[Y]$ is estimated by an
+        independent pre-pass with `cv_n_paths_for_ey` paths.
+    cv_n_paths_for_ey : int
+        Path count for the $\\mathbb{E}[Y]$ pre-pass (ignored unless
+        `control_variate` is set). Larger = less Monte Carlo error in
+        $\\mathbb{E}[Y]$ → cleaner CV correction.
+    cv_seed_offset : int
+        Added to `seed` (when set) for the pre-pass to keep it independent
+        of the main pricing sample.
 
     Returns
     -------
@@ -150,6 +254,57 @@ def price_fcn(
         "seed": seed,
     }
 
+    cv_diag: Optional[dict] = None
+    if control_variate is not None:
+        if control_variate != "worst_of_put":
+            raise ValueError(
+                f"control_variate must be 'worst_of_put' or None, got {control_variate!r}"
+            )
+        # --- Same-sample worst-of put PVs (correlated with FCN PVs by construction) ---
+        y_main = _worst_of_european_put_pv(
+            paths=paths, spots=cfg.spots, strike_perf=product.strike,
+            rate=market.rate, notional=product.notional,
+            T_pay=float(grid.pay_year_fractions[-1]),
+        )
+        # Independent pre-pass for E[Y]. We choose a separate seed so the
+        # pre-pass and the main sample are truly independent — otherwise the
+        # CV correction would have zero expectation by construction.
+        pre_seed = (seed + cv_seed_offset) if seed is not None else cv_seed_offset
+        ey_hat, ey_se = _worst_of_european_put_expectation(
+            market=market, product=product,
+            n_paths=cv_n_paths_for_ey, antithetic=antithetic,
+            seed=pre_seed, day_count=day_count,
+        )
+        var_y = float(y_main.var(ddof=1))
+        cov_xy = float(np.cov(pv, y_main, ddof=1)[0, 1])
+        beta_hat = cov_xy / var_y if var_y > 0.0 else 0.0
+        rho_xy = cov_xy / np.sqrt(max(var_y, 1e-30) * max(float(pv.var(ddof=1)), 1e-30))
+
+        pv_cv = pv - beta_hat * (y_main - ey_hat)
+        price_cv = float(pv_cv.mean())
+        se_cv = float(pv_cv.std(ddof=1) / np.sqrt(n_total))
+        var_reduction_ratio = (
+            float(pv.var(ddof=1)) / max(float(pv_cv.var(ddof=1)), 1e-30)
+        )
+
+        cv_diag = {
+            "kind": "worst_of_put",
+            "strike_perf": product.strike,
+            "beta_hat": beta_hat,
+            "rho_XY": rho_xy,
+            "EY_hat": ey_hat,
+            "EY_se": ey_se,
+            "n_paths_for_ey": cv_n_paths_for_ey * (2 if antithetic else 1),
+            "price_no_cv": price,
+            "se_no_cv": se,
+            "price_cv": price_cv,
+            "se_cv": se_cv,
+            "var_reduction_ratio": var_reduction_ratio,
+        }
+        # Overwrite the headline price/SE with the CV-adjusted values when CV is on.
+        price = price_cv
+        se = se_cv
+
     return PricingResult(
         price=price,
         standard_error=se,
@@ -158,6 +313,7 @@ def price_fcn(
         probability=prob,
         pv_samples=pv,
         diagnostics=diagnostics,
+        cv_diagnostics=cv_diag,
     )
 
 

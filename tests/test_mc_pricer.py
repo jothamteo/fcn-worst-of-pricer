@@ -19,7 +19,12 @@ import pytest
 
 from src.fcn_payoff import FCNProduct
 from src.market_data import MarketData
-from src.mc_pricer import price_fcn, realised_payoff
+from src.mc_pricer import (
+    _worst_of_european_put_expectation,
+    _worst_of_european_put_pv,
+    price_fcn,
+    realised_payoff,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -239,3 +244,74 @@ def test_realised_payoff_matured_par():
 def test_realised_payoff_requires_dataframe():
     with pytest.raises(TypeError):
         realised_payoff(history="not a dataframe", product=_product())
+
+
+# ---------------------------------------------------------------------------
+# Control variate (worst-of European put)
+# ---------------------------------------------------------------------------
+
+
+def test_cv_path_runs_and_reduces_variance():
+    """With realistic vols, the worst-of put CV should reduce variance —
+    typically by a factor in the 2–10× range for FCNs of this shape. We
+    require ≥ 1.3× as a generous floor (catches both wiring bugs and a
+    pathological β̂ estimate).
+    """
+    res = price_fcn(
+        _market(), _product(), n_paths=15_000, seed=20260601,
+        control_variate="worst_of_put", cv_n_paths_for_ey=60_000,
+    )
+    assert res.cv_diagnostics is not None
+    cv = res.cv_diagnostics
+    assert cv["var_reduction_ratio"] >= 1.3, (
+        f"CV did not meaningfully reduce variance: ratio = {cv['var_reduction_ratio']:.3f}"
+    )
+    # The CV correction should be modest in size (β̂ × (Ȳ − Ê[Y]) of order an SE).
+    assert abs(cv["price_cv"] - cv["price_no_cv"]) < 5 * cv["se_no_cv"]
+
+
+def test_cv_correlation_is_negative():
+    """The worst-of put pays *more* when the FCN PV is *less* (KI breached →
+    FCN loses, put gains). β̂ should be negative."""
+    res = price_fcn(
+        _market(), _product(), n_paths=10_000, seed=99,
+        control_variate="worst_of_put", cv_n_paths_for_ey=40_000,
+    )
+    cv = res.cv_diagnostics
+    assert cv["rho_XY"] < 0.0, f"corr(FCN PV, worst-of put PV) should be < 0, got {cv['rho_XY']:.4f}"
+    assert cv["beta_hat"] < 0.0, f"β̂ should be negative, got {cv['beta_hat']:.4f}"
+
+
+def test_cv_price_within_no_cv_band():
+    """The CV price is unbiased (in expectation), so for any seed the
+    `price_cv` should land within a few SE of `price_no_cv` and of an
+    independent high-N reference price."""
+    p, m = _product(), _market()
+    cv_res = price_fcn(
+        m, p, n_paths=10_000, seed=20260602,
+        control_variate="worst_of_put", cv_n_paths_for_ey=40_000,
+    )
+    ref = price_fcn(m, p, n_paths=80_000, seed=20260603)  # high-N reference (no CV)
+    band = 4.0 * (cv_res.standard_error + ref.standard_error)
+    assert abs(cv_res.price - ref.price) < band, (
+        f"CV price {cv_res.price:.2f} vs reference {ref.price:.2f} differ by "
+        f"{abs(cv_res.price - ref.price):.2f} > 4·(SE+SE_ref) = {band:.2f}"
+    )
+
+
+def test_worst_of_put_pv_intrinsic_at_zero_vol():
+    """With zero vols and a non-trivial strike, the worst-of put PV reduces
+    to the deterministic intrinsic, discounted from the pay date."""
+    p = _product()
+    m = _market(vols=(0.0, 0.0, 0.0), rate=0.05)
+    # At zero vol, S_i(T)/S_i(0) = exp(rate · T). With strike=0.70 and exp(rT) > 0.70,
+    # the put expires worthless.
+    res = price_fcn(m, p, n_paths=64, seed=0,
+                    control_variate="worst_of_put", cv_n_paths_for_ey=64)
+    cv = res.cv_diagnostics
+    assert cv["EY_hat"] < 1e-6, f"E[Y] should be ~0 at zero vol with positive rate, got {cv['EY_hat']}"
+
+
+def test_cv_invalid_kind_raises():
+    with pytest.raises(ValueError):
+        price_fcn(_market(), _product(), n_paths=64, seed=0, control_variate="not_a_thing")
