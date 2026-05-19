@@ -29,7 +29,7 @@ streamlit run app.py
 
 ## What this is
 
-A from-scratch Python implementation of a **worst-of Fixed Coupon Note** pricer on a 3-name semiconductor basket (NVDA, AMD, TSM). Pricing is done by Monte Carlo on correlated GBM, cross-validated against a 1D Crank–Nicolson PDE on a reduced single-asset case. Greeks are computed by bump-and-revalue with common random numbers. Everything (GBM engine, Cholesky correlation, antithetic + control variates, FCN payoff, PDE scheme) is written in NumPy — no QuantLib, no FinancePy.
+A from-scratch Python implementation of a **worst-of Fixed Coupon Note** pricer on a 3-name megacap-tech basket (AMZN, META, MU). Pricing is done by Monte Carlo on correlated GBM, cross-validated against a 1D Crank–Nicolson PDE on a reduced single-asset case. Greeks are computed by bump-and-revalue with common random numbers. Everything (GBM engine, Cholesky correlation, antithetic + control variates, FCN payoff, PDE scheme) is written in NumPy — no QuantLib, no FinancePy.
 
 ## Why this project
 
