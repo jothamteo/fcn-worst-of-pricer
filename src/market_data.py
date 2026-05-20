@@ -462,7 +462,7 @@ def _risk_free_rate(
 
 
 def load_market_data(
-    tickers: Sequence[str] = ("NVDA", "AMD", "TSM"),
+    tickers: Sequence[str] = ("AMZN", "META", "MU"),
     lookback_years: int = 5,
     target_T: float = 1.0,
     as_of: Optional[Union[date, str]] = None,
