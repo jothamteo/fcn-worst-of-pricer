@@ -5,7 +5,7 @@ reduction of the worst-of FCN. The 3-asset worst-of is a 3D PDE problem with
 discrete-observation features — out of scope for this repo. Dropping to one
 underlying removes the worst-of operator while keeping every other product
 feature: autocall ladder, conditional/flat coupons, European knock-in,
-non-geared (or geared) maturity payoff.
+geared (or non-geared) maturity payoff.
 
 We solve in log-spot $x = \log(S/S_0)$, where the PDE has constant
 coefficients,

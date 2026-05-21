@@ -41,7 +41,7 @@ path through maturity at **4 May 2026** to compare model vs. reality.
 | Maturity | 4 May 2026 |
 | Coupon | 1.535% per period, **flat** (18.42% p.a., monthly) |
 | Autocall barrier | 100% of initial, worst-of basis |
-| Strike (= KI) | 70% of initial, **non-geared** downside |
+| Strike (= KI) | 70% of initial, **geared** downside (physical settlement at strike) |
 | KI observation | European (at final valuation only) |
 | Autocall fixings | 1 Dec '25, 31 Dec '25, 2 Feb '26, 2 Mar '26, 31 Mar '26 |
 | Payment dates | 3 Dec '25, 5 Jan '26, 4 Feb '26, 4 Mar '26, 2 Apr '26, 4 May '26 |
@@ -129,7 +129,7 @@ code(
     strike=0.70,
     n_autocall_obs=5,
     coupon_barrier=None,        # flat coupons, no barrier
-    geared_downside=False,      # redemption = N * W(T) when knocked in
+    geared_downside=True,       # physical settlement at strike: redemption = N * W(T) / strike when knocked in
     continuous_ki=False,        # KI checked at final valuation only
 )
 

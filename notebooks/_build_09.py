@@ -142,7 +142,7 @@ We consume the Phase 5 Greeks (recomputed here with the same seed so the
 notebook is fully reproducible) and feed them through
 `compute_delta_hedge`. The function rescales the deltas from the pricer's
 50,000 reference notional to the trade's $1M notional — delta is linear in
-notional for a non-geared FCN, so this is a simple multiplicative scale."""
+notional for this FCN payoff, so this is a simple multiplicative scale."""
 )
 
 code(

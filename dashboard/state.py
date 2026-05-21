@@ -97,7 +97,7 @@ def _default_product() -> FCNProduct:
         strike=0.70,
         n_autocall_obs=5,
         coupon_barrier=None,
-        geared_downside=False,
+        geared_downside=True,
         continuous_ki=False,
     )
 

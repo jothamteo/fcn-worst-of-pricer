@@ -17,7 +17,7 @@ README and METHODOLOGY; the *hedging* is what this doc covers.
 ## 1. Decomposition
 
 The cleanest way to see the FCN is to break it into things the desk can
-already price one-by-one. For a non-geared worst-of FCN with notional $N$:
+already price one-by-one. For a worst-of FCN with notional $N$:
 
 $$
 V_{\text{FCN}} \;=\; \underbrace{N \cdot \text{ZCB}(T)}_{\text{zero-coupon bond}}

@@ -5,7 +5,7 @@ Notation matches `METHODOLOGY.md` §3, generalised to:
   - configurable, irregularly-spaced observation dates,
   - separate payment dates per observation (T+settlement);
   - flat (guaranteed) OR conditional-on-barrier coupons;
-  - geared OR non-geared maturity downside;
+  - geared (physical-settlement-at-strike) OR non-geared maturity downside;
   - European OR continuous knock-in monitoring;
   - any number of underlyings ≥ 1.
 
@@ -58,8 +58,8 @@ class FCNProduct:
         Standard worst-of FCN = 1.00 (i.e. 100% of initial).
     strike : float
         Worst-of normalised level at maturity below which the downside payoff
-        kicks in. Standard = 0.70 (70% of initial). For non-geared FCNs this
-        is also the knock-in barrier — there is no separate KI level.
+        kicks in. Standard = 0.70 (70% of initial). For this FCN structure
+        this is also the knock-in barrier — there is no separate KI level.
     n_autocall_obs : int
         Number of leading observations that are autocall fixing dates. The
         remaining `len(obs_dates) - n_autocall_obs` observations (typically
@@ -70,10 +70,13 @@ class FCNProduct:
         `W(obs_dates[j]) ≥ coupon_barrier`. If None (default), the coupon is
         flat / guaranteed each period until autocall.
     geared_downside : bool
-        If True, redemption when knocked in is `N · W(T)/strike` (the standard
-        "geared put" payoff with break-even at strike). If False (default for
-        this JT-spec'd structure), redemption is `N · W(T)` (1:1 with worst-of
-        performance from initial, capped at par).
+        If True (default), redemption when knocked in is `N · W(T)/strike` —
+        the standard "geared put" payoff with break-even at strike. This is
+        equivalent to physical settlement of `N/K_price` shares of the worst
+        performer (i.e. notional divided by the strike price level), which is
+        the standard Asian-retail worst-of FCN structure. If False, redemption
+        is `N · W(T)` (1:1 with worst-of performance from initial, capped at
+        par) — a non-geared variant with a discontinuous jump at the strike.
     continuous_ki : bool
         If True, knock-in is triggered when the worst-of touches the strike
         on ANY simulated grid point during the life of the note. If False
@@ -89,7 +92,7 @@ class FCNProduct:
     strike: float = 0.70
     n_autocall_obs: Optional[int] = None
     coupon_barrier: Optional[float] = None
-    geared_downside: bool = False
+    geared_downside: bool = True
     continuous_ki: bool = False
 
     def __post_init__(self) -> None:
