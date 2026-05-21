@@ -45,13 +45,23 @@ Generic worst-of FCN, 1Y tenor, quarterly observations:
 - **Coupon:** 8% p.a., paid quarterly (2.0 per quarter), conditional on coupon barrier
 - **Coupon barrier:** 70% of initial spot (worst-performer basis)
 - **Autocall barrier:** 100% of initial spot (early redemption at par + coupon if breached on an observation date; first observation excluded by default, configurable)
-- **Knock-in barrier:** 65% of initial spot, observed at maturity (European; continuous variant also implemented)
+- **Knock-in barrier:** 70% of initial spot, observed at maturity (European; continuous variant also implemented)
+- **Settlement method (downside, if KI triggered):** **physical delivery** of shares of the worst-performing underlying at the strike price. The client receives approximately `N / (strike × S_worst(0))` shares; fractional shares are settled in cash. The pricer values this at the cash-equivalent `N · W(T) / strike` (the fractional-share rounding residual is negligible relative to MC SE). Switch to **cash settlement** (`physical_delivery=False`) for the harsher 1-for-1 cash payoff `N · W(T)`.
 - **Maturity payoff (if not autocalled):**
   - Worst performer ≥ 100%: par + final coupon
-  - Knock-in not breached: par + final coupon
-  - Knock-in breached and worst < 100%: notional × (worst / initial) + final coupon
+  - Knock-in not breached (worst ≥ strike): par + final coupon
+  - Knock-in breached (worst < strike): cash-equivalent of `N / (strike × S_worst(0))` shares × `S_worst(T)` = `N · W(T) / strike` (physical delivery), or `N · W(T)` (cash settlement)
 
-See `METHODOLOGY.md` for formal payoff notation. Reference: Bouzoubaa & Osseiran, Ch. 12.
+See `METHODOLOGY.md` for formal payoff notation; settlement-method math is in §3. Reference: Bouzoubaa & Osseiran, Ch. 12.
+
+### Settlement method: physical delivery vs cash settlement
+
+| Method | KI-region payoff | Continuity at strike | Why a desk picks it |
+|---|---|---|---|
+| Physical delivery (default) | `N · W(T) / strike` (cash-equivalent of share delivery at strike) | Continuous at `W(T) = strike` | Standard Asia-retail FCN: issuer's intent is to transfer shares to a client willing to hold the worst-performer at the strike-level entry price. |
+| Cash settlement | `N · W(T)` | Discontinuous jump at the strike | Non-standard / institutional variants; results in a deeper loss for the holder by a factor of `1/strike` in the KI region. |
+
+Neither is "geared" in the structured-products sense — gearing implies amplified, super-linear losses, which neither of these mechanisms has.
 
 ## Pricing approach
 
@@ -68,35 +78,47 @@ AMZN / META / MU snapshot as of 17 Oct 2025 (see notebooks/01).
 
 | | Value |
 |---|---|
-| **Final MC price** (160k antithetic paths + worst-of put CV) | **47,063.94 USD** (94.13% of notional) |
-| MC standard error (with CV) | 11.74 |
-| Same engine, no CV (antithetic only) | 47,042.65 ± 21.78 |
-| Variance-reduction ratio Var(X)/Var(X_cv) | **3.44×** |
-| corr(FCN PV, worst-of put PV) per path | **−0.84** |
+| **Final MC price** (160k antithetic paths + worst-of put CV) | **50,294.24 USD** (100.59% of notional) |
+| MC standard error (with CV) | 4.44 |
+| Same engine, no CV (antithetic only) | 50,282.60 ± 10.97 |
+| Variance-reduction ratio Var(X)/Var(X_cv) | **≈ 6.1×** |
+| corr(FCN PV, worst-of put PV) per path | **strongly negative** (see notebook 06) |
+
+(Physical-delivery settlement; switching to cash settlement drops the price by ~6 percentage points of notional in the KI region.)
 
 **PDE cross-validation** (single-asset reductions, 1600 × 160 grid):
 
 | Reduction | MC ± SE | PDE | \|Δ\| / SE |
 |---|---|---|---|
-| AMZN | 50,279.53 ± 11.28 | 50,273.42 | 0.54 |
-| META | 49,265.50 ± 15.23 | 49,266.82 | 0.09 |
-| MU   | 48,908.34 ± 16.46 | 48,911.74 | 0.21 |
+| AMZN | 51,225.04 ± 4.72  | 51,211.49 | 2.87 |
+| META | 50,736.70 ± 7.22  | 50,728.07 | 1.19 |
+| MU   | 50,530.82 ± 8.23  | 50,522.83 | 0.97 |
 
 All three PDE prices land well inside the MC 1-σ band — the path engine,
 payoff arithmetic, observation-grid plumbing and discount accounting all
 agree with an independent deterministic solver. (See notebook 04.)
 
-**Greeks** (bump-and-revalue MC, CRN, 80k antithetic paths, 1% spot bump):
+**Greeks** (bump-and-revalue MC, CRN, 80k antithetic paths, 1% spot bump,
+physical-delivery payoff):
 
 | Asset | Δ per 1% | Γ per 1%×1% | vega per vol-pt |
 |---|---|---|---|
-| AMZN | +47.82  | +0.26  | −54.92  |
-| META | +86.59  | −7.38  | −88.93  |
-| MU   | +106.18 | −0.69  | −102.60 |
+| AMZN | −1.89  | −0.07  | −23.20  |
+| META | +26.96 | −2.03  | −54.62  |
+| MU   | +36.21 | −0.91  | −65.64  |
 
-Off-diagonal correlation sensitivities are positive on all three pairs
-(the holder is long-correlation — see the discussion in notebook 05).
-Probability decomposition: P(autocall) ≈ 44%, P(KI at maturity) ≈ 27%,
+AMZN's small negative Δ is the autocall feature dominating at the
+current fixings: the basket is in-the-money enough that a higher AMZN
+spot raises the probability of an early autocall (which pays par +
+small accrued coupon — *less* than the alive continuation value), so
+the holder's PV falls slightly. META and MU still have positive Δ
+because their higher vols make KI-risk the dominant local sensitivity.
+Vegas are negative on every name (the FCN holder is short vol —
+classic for an autocall + KI structure). Pairwise correlation
+sensitivity is mostly positive (notably META–MU): the holder is
+long-correlation since decorrelated names raise the probability of
+one name dragging the worst-of through the KI barrier. Probability
+decomposition: P(autocall) ≈ 44%, P(KI at maturity) ≈ 26%,
 P(par at maturity, no AC) ≈ 30%.
 
 ## Honest findings

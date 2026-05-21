@@ -53,6 +53,18 @@ bump-and-revalue noise at the barriers.
 4. Bias-variance trade-off: sweep $k$ and watch the price bias vanish vs
    the residual Γ noise grow.
 5. Recommended desk default for $k$ on this product.
+
+**Note on settlement method.** This product uses **physical delivery**, which
+makes the maturity payoff *continuous at the strike* (break-even sits exactly
+at $W(T) = K$, no cliff). That alone removes the KI-region Γ blow-up under
+hard MC — there is no payoff discontinuity for the bump to straddle. The
+**autocall barrier remains discontinuous** under both settlement methods,
+however (par + coupon vs alive continuation), so smoothing is still useful
+there. Under **cash settlement** the KI discontinuity at the strike would
+return and the Γ blow-up would be even more pronounced — smoothing would be
+useful at *both* barriers. The plots below are under physical delivery; the
+remaining hard-MC noise is dominated by the autocall barrier and the
+distance-to-barrier Γ-statistics of the bump estimator.
 """
 )
 
@@ -118,6 +130,7 @@ product = FCNProduct(
     autocall_barrier=1.00,
     strike=0.70,
     n_autocall_obs=5,
+    physical_delivery=True,
 )
 
 amzn_market = MarketData(

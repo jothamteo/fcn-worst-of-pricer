@@ -122,7 +122,7 @@ product = FCNProduct(
     strike=0.70,
     n_autocall_obs=5,
     coupon_barrier=None,
-    geared_downside=True,
+    physical_delivery=True,
     continuous_ki=False,
 )
 """

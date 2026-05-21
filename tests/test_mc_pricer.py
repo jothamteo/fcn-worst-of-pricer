@@ -56,7 +56,7 @@ def _product(**overrides) -> FCNProduct:
         autocall_barrier=1.00,
         strike=0.70,
         n_autocall_obs=5,
-        geared_downside=False,
+        physical_delivery=False,
         continuous_ki=False,
     )
     base.update(overrides)
@@ -159,7 +159,7 @@ def test_zero_vol_zero_rate_no_autocall_no_ki():
 
 def test_zero_vol_extreme_negative_drift_triggers_ki():
     """Force the path deep below the strike via large negative net drift
-    (rate=0, divs=1.5/yr). Worst-of stays below strike — non-geared payoff."""
+    (rate=0, divs=1.5/yr). Worst-of stays below strike — cash-settled payoff."""
     p = _product()
     m = _market(
         vols=(0.0, 0.0, 0.0),
@@ -214,7 +214,7 @@ def test_realised_payoff_autocall_period_1():
     np.testing.assert_allclose(out["pv_at_issue"], expected_total * df_1, rtol=1e-12)
 
 
-def test_realised_payoff_matured_ki_non_geared():
+def test_realised_payoff_matured_ki_cash_settled():
     p = _product()
     # Hover above autocall for early obs? No — keep below 1.00 and dip at the end.
     hist = _flat_history(

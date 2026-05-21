@@ -64,7 +64,7 @@ def _amzn_meta_mu_product(**overrides) -> FCNProduct:
         strike=0.70,
         n_autocall_obs=5,
         coupon_barrier=None,
-        geared_downside=False,
+        physical_delivery=False,
         continuous_ki=False,
     )
     base.update(overrides)

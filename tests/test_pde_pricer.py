@@ -62,7 +62,7 @@ def _single_asset_product(**overrides) -> FCNProduct:
         strike=0.70,
         n_autocall_obs=5,
         coupon_barrier=None,
-        geared_downside=False,
+        physical_delivery=False,
         continuous_ki=False,
     )
     base.update(overrides)
@@ -206,9 +206,9 @@ def test_pde_matches_mc_on_single_asset_fcn():
     )
 
 
-def test_pde_matches_mc_on_single_asset_fcn_geared_downside():
-    """Same cross-validation, but with the geared variant of the maturity payoff."""
-    product = _single_asset_product(geared_downside=True)
+def test_pde_matches_mc_on_single_asset_fcn_physical_delivery():
+    """Same cross-validation, but with the physical-delivery variant of the maturity payoff."""
+    product = _single_asset_product(physical_delivery=True)
     market = _single_asset_market(spot=100.0, vol=0.40, rate=0.04, div=0.0)
 
     mc = price_fcn(market=market, product=product, n_paths=80_000, antithetic=True, seed=11)

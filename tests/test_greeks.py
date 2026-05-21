@@ -61,7 +61,7 @@ def _product(**overrides) -> FCNProduct:
         strike=0.70,
         n_autocall_obs=5,
         coupon_barrier=None,
-        geared_downside=False,
+        physical_delivery=False,
         continuous_ki=False,
     )
     base.update(overrides)
@@ -102,7 +102,7 @@ def _three_asset_market(spot=100.0, vol=0.35, rho=0.6, rate=0.04, div=0.0) -> Ma
 
 def test_pde_offgrid_delta_matches_bs_for_vanilla_call():
     """Stand up a tiny "FCN" whose payoff reduces to a vanilla European put
-    payoff at maturity (geared downside, no autocall) and check Δ vs BS Δ.
+    payoff at maturity (physical-delivery downside, no autocall) and check Δ vs BS Δ.
 
     The cleanest test would use the standalone `price_european_call_pde`, but
     that returns only `V_at_issue` — exactly what we need to test the

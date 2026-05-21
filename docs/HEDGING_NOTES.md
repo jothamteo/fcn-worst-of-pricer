@@ -187,13 +187,21 @@ has to cover:
   cost (it usually does, by a little), the trade still makes money.
 
 For a textbook 1Y worst-of FCN on liquid US single names, the spread at
-issuance is typically 1–3% of notional. The trade settles to roughly
-94–97% of notional in this repo's MC (47,063.94 / 50,000 = 94.13%); the
-remaining 3–6% is the desk's *modelled* profit margin before any of the
-above runs against them. If the trade runs cleanly, the desk earns most
-of that 6%; if it runs into a real gap or a correlation shock, much of
-that 6% goes back out the door covering the reserves it was sized to
-compensate for.
+issuance is typically 1–3% of notional. Under physical-delivery
+settlement (the JT-spec'd default for this repo), the trade settles to
+roughly par or slightly above in this repo's MC (50,294.24 / 50,000 =
+100.59%); the issuer's structural-margin compensation comes from the
+**funding leg + theta minus realised hedge cost** rather than from a
+visible par-discount on day 1. Under cash settlement the trade would
+clear several percentage points below par (~94% in the same engine —
+the harsher of the two for the holder), and the issuer's compensation
+would partially come from the par-to-price gap.
+
+Either way, the desk's day-1 margin has to cover the same risk
+components below, and the bid–ask quoted to the client is sized
+accordingly. If the trade runs cleanly the desk earns most of it; if
+it runs into a real gap or a correlation shock, much of it goes back
+out the door covering the reserves it was sized to compensate for.
 
 That asymmetric P&L profile — a fixed upside (the structuring margin) and
 a stochastic downside (the realised hedge cost minus the modelled hedge

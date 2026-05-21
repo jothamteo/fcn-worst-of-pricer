@@ -2,7 +2,7 @@
 
 Tests are deterministic — hand-crafted paths drive specific code paths
 (autocall in period 1/2/.../last, KI at maturity, par at maturity, flat vs
-conditional coupon, geared vs non-geared downside, continuous KI).
+conditional coupon, physical-delivery vs cash-settled downside, continuous KI).
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ def _amzn_meta_mu_product(**overrides) -> FCNProduct:
         strike=0.70,
         n_autocall_obs=5,
         coupon_barrier=None,
-        geared_downside=False,
+        physical_delivery=False,
         continuous_ki=False,
     )
     base.update(overrides)
@@ -194,8 +194,8 @@ def test_no_autocall_par_at_maturity_returns_notional_plus_six_coupons():
     np.testing.assert_allclose(pv[0], expected, rtol=1e-12)
 
 
-def test_no_autocall_ki_pays_worst_perf_times_notional_non_geared():
-    """Knock-in at maturity: redemption = N * W(T), not N * W(T) / strike."""
+def test_no_autocall_ki_pays_worst_perf_times_notional_cash_settled():
+    """Cash-settled knock-in at maturity: redemption = N * W(T), not N * W(T) / strike."""
     p = _amzn_meta_mu_product()
     grid = ObservationGrid.from_product(p)
     W_T = 0.50
@@ -207,8 +207,8 @@ def test_no_autocall_ki_pays_worst_perf_times_notional_non_geared():
     np.testing.assert_allclose(pv[0], expected, rtol=1e-12)
 
 
-def test_geared_downside_scales_by_strike():
-    p = _amzn_meta_mu_product(geared_downside=True)
+def test_physical_delivery_scales_by_strike():
+    p = _amzn_meta_mu_product(physical_delivery=True)
     grid = ObservationGrid.from_product(p)
     W_T = 0.50
     perf = np.array([0.85, 0.80, 0.75, 0.72, 0.71, W_T])
@@ -217,6 +217,41 @@ def test_geared_downside_scales_by_strike():
     pv = payoff_per_path(paths=paths, spots=spots, product=p, grid=grid, rate=0.0)
     expected = (p.notional * W_T / p.strike) + 6 * p.coupon_rate * p.notional
     np.testing.assert_allclose(pv[0], expected, rtol=1e-12)
+
+
+def test_settlement_method_formula_equivalence_at_w_below_strike():
+    """At W(T)=0.5, K=0.7: physical → N·W/K = 0.714N, cash → N·W = 0.5N.
+
+    Both branches must match the respective formulas exactly and differ from
+    each other by the 1/K factor that is the *whole* economic distinction
+    between the two settlement methods.
+    """
+    W_T = 0.50
+    perf = np.array([0.85, 0.80, 0.75, 0.72, 0.71, W_T])
+
+    p_phys = _amzn_meta_mu_product(physical_delivery=True)
+    p_cash = _amzn_meta_mu_product(physical_delivery=False)
+    assert p_phys.strike == 0.70 == p_cash.strike  # sanity
+
+    grid_phys = ObservationGrid.from_product(p_phys)
+    grid_cash = ObservationGrid.from_product(p_cash)
+    paths_phys, spots_phys = _build_constant_perf_paths(p_phys, grid_phys, perf)
+    paths_cash, spots_cash = _build_constant_perf_paths(p_cash, grid_cash, perf)
+
+    coupons = 6 * p_phys.coupon_rate * p_phys.notional
+
+    pv_phys = payoff_per_path(paths=paths_phys, spots=spots_phys, product=p_phys, grid=grid_phys, rate=0.0)
+    pv_cash = payoff_per_path(paths=paths_cash, spots=spots_cash, product=p_cash, grid=grid_cash, rate=0.0)
+
+    expected_phys_redemption = p_phys.notional * W_T / p_phys.strike  # 0.714 N
+    expected_cash_redemption = p_cash.notional * W_T                    # 0.500 N
+    np.testing.assert_allclose(pv_phys[0], expected_phys_redemption + coupons, rtol=1e-12)
+    np.testing.assert_allclose(pv_cash[0], expected_cash_redemption + coupons, rtol=1e-12)
+
+    # The 1/K relationship is the entire economic difference between the two.
+    redemption_phys = pv_phys[0] - coupons
+    redemption_cash = pv_cash[0] - coupons
+    np.testing.assert_allclose(redemption_phys, redemption_cash / p_phys.strike, rtol=1e-12)
 
 
 def test_conditional_coupon_skipped_when_below_barrier():

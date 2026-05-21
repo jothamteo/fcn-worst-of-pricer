@@ -61,7 +61,9 @@ If no such $j^\star$ exists, walk through all $t_j$ paying conditional coupons, 
 
 $$\text{Final redemption} = \begin{cases} N, & W(T) \ge B_{ac} \\ N, & W(T) \ge B_{ki}\ \text{(no knock-in)} \\ N \cdot W(T) / B_{ki}, & \text{knock-in breached and } W(T) < B_{ki} \end{cases}$$
 
-The KI-breach branch is the **geared put** payoff: the cash equivalent of physical settlement at the strike price (the client receives $N / K_{\text{price}}$ shares of the worst performer, where $K_{\text{price}} = B_{ki} \cdot S_0$, worth $(N / K_{\text{price}}) \cdot S(T) = N \cdot W(T) / B_{ki}$ at maturity). Break-even is exactly at $W(T) = B_{ki}$, so the payoff is continuous at the barrier. The library also supports a non-geared variant ($R = N \cdot W(T)$ on breach, discontinuous at the barrier) via `geared_downside=False` — used in some non-standard structures.
+The KI-breach branch above is the cash equivalent of **physical delivery**: the client receives $n = N / K_{\text{price}}$ shares of the worst-performing underlying purchased at the strike price $K_{\text{price}} = B_{ki} \cdot S_{\text{worst}}(0)$, worth $n \cdot S_{\text{worst}}(T) = N \cdot W(T) / B_{ki}$ at maturity (fractional shares settled in cash; the rounding residual is negligible relative to MC standard error). Break-even is exactly at $W(T) = B_{ki}$, so the payoff is continuous at the barrier. The library also supports **cash settlement** ($R = N \cdot W(T)$ on breach, discontinuous at the barrier) via `physical_delivery=False` — cash settlement is the harsher of the two for the holder and corresponds to non-standard structures.
+
+Note on terminology: "physical delivery" is the standard industry term for share-settlement-at-strike; the alternative is "cash settlement". Neither is "geared" in the structured-products sense (gearing implies amplified, super-linear losses, which this product does not have).
 
 The "knock-in breached" check is the European variant by default: $W(T) < B_{ki}$. Continuous monitoring is also implemented (knocked in if $\min_{t \in [0,T]} W(t) < B_{ki}$); see `fcn_payoff.py`.
 
@@ -116,7 +118,7 @@ is locked in by $S(t_M)$, so we set
 $$V(S, t_M) = \big[R(S) + c_M(S)\big]\cdot e^{-r(T_{\text{pay},M} - t_M)},$$
 
 where $R(S) = N$ if $S/S_0 \ge B_{ki}$ and $R(S) = N \cdot S/(S_0 \cdot B_{ki})$ otherwise
-(geared put: physical settlement at strike), and $c_M(S)$ is the final coupon (flat or conditional on
+(physical delivery: cash-equivalent of shares delivered at strike), and $c_M(S)$ is the final coupon (flat or conditional on
 $S/S_0 \ge B_c$). Walking backward, between consecutive autocall fixings
 the PDE evolves freely. At each autocall observation $t_j$, $j < n_{ac}$:
 

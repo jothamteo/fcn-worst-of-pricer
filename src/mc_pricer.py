@@ -405,7 +405,7 @@ def realised_payoff(
             cashflows.append((product.pay_dates[j], "maturity_redemption_par", N))
             outcome = "matured_par"
         else:
-            if product.geared_downside:
+            if product.physical_delivery:
                 redemption = N * W_final / product.strike
             else:
                 redemption = N * W_final

@@ -52,7 +52,20 @@ interview without hand-waving.
 
 Everything in this notebook *consumes* the Greeks computed in notebooks 05
 and 08; nothing is re-derived. Hedge arithmetic lives in `src/hedging.py`,
-tested in `tests/test_hedging.py`."""
+tested in `tests/test_hedging.py`.
+
+**Note on settlement method.** The FCN here uses **physical delivery**: if KI
+triggers at maturity, the issuer delivers approximately $N / (K \cdot
+S_{\text{worst}}(0))$ shares of the worst-performer to the client at the
+strike price. The Greek *profile* and the hedge ratios (Δ shares, vega
+options) have the same shape as they would under cash settlement — only the
+magnitudes and the maturity-payoff slope differ. The operational consequence
+on the hedge desk side: the issuer's hedge book needs the **operational
+capacity to source and deliver actual shares** of whichever name turns out
+to be the worst-performer at maturity. For liquid US large-caps (AMZN, META,
+MU) this is routine; on less-liquid names it would require borrow-arrangement
+contingencies. Cash settlement avoids the physical-share leg entirely, at
+the cost of being a harsher payoff for the holder."""
 )
 
 code(
@@ -130,6 +143,7 @@ product = FCNProduct(
     autocall_barrier=1.00,
     strike=0.70,
     n_autocall_obs=5,
+    physical_delivery=True,
 )
 """
 )

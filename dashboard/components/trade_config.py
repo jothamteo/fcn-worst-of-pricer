@@ -24,6 +24,26 @@ def render() -> None:
         col_c.metric("Autocall barrier", f"{100 * product.autocall_barrier:.0f}%")
         col_c.metric("Knock-in (strike)", f"{100 * product.strike:.0f}%")
 
+        settlement = "Physical delivery" if product.physical_delivery else "Cash settlement"
+        settlement_help = (
+            "**Physical delivery** (default): if the worst-performing underlying "
+            "finishes below the strike at maturity, the issuer delivers approximately "
+            "N / (strike × initial price) shares of that underlying to the client. "
+            "Fractional shares settled in cash. The client ends up holding a "
+            "concentrated position in the worst-performer at the strike-level "
+            "purchase price. Cash-equivalent fair value: N × W(T) / strike.\n\n"
+            "**Cash settlement**: if the worst-performing underlying finishes below "
+            "the strike at maturity, the client receives a cash amount equal to "
+            "N × worst-of performance. No share delivery. Harsher than physical "
+            "delivery for the holder because there is no strike-level conversion: "
+            "the loss differs by a factor of 1/strike in the KI region."
+        )
+        st.metric(
+            "Settlement method",
+            settlement,
+            help=settlement_help,
+        )
+
         st.markdown(
             f"**Underlyings:** `{', '.join(initial.tickers)}` &nbsp;|&nbsp; "
             f"**Issue date:** {product.issue_date.isoformat()} &nbsp;|&nbsp; "

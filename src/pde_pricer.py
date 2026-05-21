@@ -5,7 +5,7 @@ reduction of the worst-of FCN. The 3-asset worst-of is a 3D PDE problem with
 discrete-observation features — out of scope for this repo. Dropping to one
 underlying removes the worst-of operator while keeping every other product
 feature: autocall ladder, conditional/flat coupons, European knock-in,
-geared (or non-geared) maturity payoff.
+physical-delivery (or cash-settled) maturity payoff.
 
 We solve in log-spot $x = \log(S/S_0)$, where the PDE has constant
 coefficients,
@@ -301,7 +301,7 @@ def price_fcn_pde_1d(
     """Price the single-asset reduction of `product` by Crank-Nicolson.
 
     The "single-asset reduction" keeps `product`'s coupon schedule, barriers,
-    geared/non-geared rule, and KI mode (European only — `continuous_ki=True`
+    settlement method (physical delivery vs cash), and KI mode (European only — `continuous_ki=True`
     is not supported here) but applies them to one underlying instead of the
     worst-of operator. So `W(t) = S(t)/S_0`.
 
@@ -358,7 +358,7 @@ def price_fcn_pde_1d(
     # PDE terminal at obs_yf[-1] equal to that cashflow discounted from the
     # pay-date back to the obs-date (a deterministic discount, since the
     # cashflow is locked in by the obs-date fixing).
-    if product.geared_downside:
+    if product.physical_delivery:
         redemption = np.where(perf >= product.strike, N, N * perf / product.strike)
     else:
         redemption = np.where(perf >= product.strike, N, N * perf)
@@ -427,7 +427,7 @@ def price_fcn_pde_1d(
             "rate": rate,
             "x_range_sigma": x_range_sigma,
             "n_time_per_period": n_time_per_period,
-            "geared_downside": product.geared_downside,
+            "physical_delivery": product.physical_delivery,
             "coupon_barrier": product.coupon_barrier,
             "autocall_barrier": product.autocall_barrier,
             "strike": product.strike,

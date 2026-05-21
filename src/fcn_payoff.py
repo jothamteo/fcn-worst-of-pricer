@@ -5,7 +5,7 @@ Notation matches `METHODOLOGY.md` §3, generalised to:
   - configurable, irregularly-spaced observation dates,
   - separate payment dates per observation (T+settlement);
   - flat (guaranteed) OR conditional-on-barrier coupons;
-  - geared (physical-settlement-at-strike) OR non-geared maturity downside;
+  - physical-delivery (shares at strike) OR cash-settled maturity downside;
   - European OR continuous knock-in monitoring;
   - any number of underlyings ≥ 1.
 
@@ -60,6 +60,8 @@ class FCNProduct:
         Worst-of normalised level at maturity below which the downside payoff
         kicks in. Standard = 0.70 (70% of initial). For this FCN structure
         this is also the knock-in barrier — there is no separate KI level.
+        The strike price level is `strike * S_worst(0)`; this is the per-share
+        contractual cost the issuer applies when settling physically.
     n_autocall_obs : int
         Number of leading observations that are autocall fixing dates. The
         remaining `len(obs_dates) - n_autocall_obs` observations (typically
@@ -69,14 +71,29 @@ class FCNProduct:
         If supplied, coupon for period j is paid only when
         `W(obs_dates[j]) ≥ coupon_barrier`. If None (default), the coupon is
         flat / guaranteed each period until autocall.
-    geared_downside : bool
-        If True (default), redemption when knocked in is `N · W(T)/strike` —
-        the standard "geared put" payoff with break-even at strike. This is
-        equivalent to physical settlement of `N/K_price` shares of the worst
-        performer (i.e. notional divided by the strike price level), which is
-        the standard Asian-retail worst-of FCN structure. If False, redemption
-        is `N · W(T)` (1:1 with worst-of performance from initial, capped at
-        par) — a non-geared variant with a discontinuous jump at the strike.
+    physical_delivery : bool
+        If True, downside settlement at maturity (when KI triggered) is by
+        **physical delivery** of shares: the client receives approximately
+        ``N / (K · S_worst(0))`` shares of the worst-performing underlying,
+        purchased at the strike price ``K · S_worst(0)``. Fractional shares
+        are settled in cash. The pricer uses the cash-equivalent fair value
+        ``N · W(T) / K`` (capped at notional in practice — see note) for
+        valuation; the fractional-share rounding residual is negligible
+        relative to MC standard error. This is the standard worst-of FCN
+        settlement form in Asia retail.
+
+        If False, downside settlement is **cash**: the client receives a
+        cash amount equal to ``N · W(T)``. This is a 1-for-1 cash payoff
+        with the worst-of performance from initial; it has a discontinuous
+        jump at the strike and is harsher than physical delivery for the
+        holder.
+
+        Note: the cap-at-notional in the physical-delivery formula is a
+        no-op in this code path because the KI branch is only entered when
+        ``W(T) < K``, so ``N · W(T) / K < N`` always holds. Default is
+        False — callers should pick the settlement method explicitly. The
+        dashboard and notebooks for this project set ``physical_delivery=True``
+        because that is the JT-spec'd structure.
     continuous_ki : bool
         If True, knock-in is triggered when the worst-of touches the strike
         on ANY simulated grid point during the life of the note. If False
@@ -92,7 +109,7 @@ class FCNProduct:
     strike: float = 0.70
     n_autocall_obs: Optional[int] = None
     coupon_barrier: Optional[float] = None
-    geared_downside: bool = True
+    physical_delivery: bool = False
     continuous_ki: bool = False
 
     def __post_init__(self) -> None:
@@ -316,7 +333,7 @@ def payoff_per_path(
     else:
         ki_triggered = W_final < product.strike
 
-    if product.geared_downside:
+    if product.physical_delivery:
         downside_payoff = N * W_final / product.strike
     else:
         downside_payoff = N * W_final
@@ -472,7 +489,7 @@ def payoff_per_path_smoothed(
                 smoothing_k_ki * (product.strike - W[:, -1]) / product.strike
             )
         W_final = W[:, -1]
-        if product.geared_downside:
+        if product.physical_delivery:
             downside_payoff = N * W_final / product.strike
         else:
             downside_payoff = N * W_final

@@ -41,7 +41,7 @@ path through maturity at **4 May 2026** to compare model vs. reality.
 | Maturity | 4 May 2026 |
 | Coupon | 1.535% per period, **flat** (18.42% p.a., monthly) |
 | Autocall barrier | 100% of initial, worst-of basis |
-| Strike (= KI) | 70% of initial, **geared** downside (physical settlement at strike) |
+| Strike (= KI) | 70% of initial, **physical delivery** at strike (shares of worst-performer) |
 | KI observation | European (at final valuation only) |
 | Autocall fixings | 1 Dec '25, 31 Dec '25, 2 Feb '26, 2 Mar '26, 31 Mar '26 |
 | Payment dates | 3 Dec '25, 5 Jan '26, 4 Feb '26, 4 Mar '26, 2 Apr '26, 4 May '26 |
@@ -72,6 +72,34 @@ from src.mc_pricer import price_fcn, realised_payoff
 
 pd.set_option('display.float_format', lambda x: f'{x:,.4f}')
 np.set_printoptions(suppress=True, precision=4)
+"""
+)
+
+# ---------------------------------------------------------------------------
+md(
+    r"""### Settlement method: physical delivery vs cash settlement
+
+This FCN settles the downside (KI-triggered) leg by **physical delivery**: if
+the worst-performing underlying finishes below the strike at maturity, the
+issuer delivers approximately $N / (K \cdot S_{\text{worst}}(0))$ shares of
+that underlying to the client, with fractional shares settled in cash. The
+client ends up holding a concentrated long position in the worst-performer at
+the strike-level purchase price.
+
+The pricer values this at the cash-equivalent fair value $N \cdot W(T) / K$ —
+the fractional-share rounding residual is negligible relative to MC standard
+error, so the payoff is reported as a continuous function of $W(T)$ rather
+than an integer share count. Break-even is exactly at $W(T) = K$, so the
+payoff is *continuous* at the strike (no cliff).
+
+The library also supports **cash settlement** (`physical_delivery=False`),
+where the downside leg is $N \cdot W(T)$ — discontinuous at the strike and
+*harsher* than physical delivery by a factor of $1/K$ in the KI region. Cash
+settlement is non-standard for retail FCNs in Asia; the JT-spec'd structure
+here is physical delivery.
+
+Neither is "geared" in the structured-products sense — gearing implies
+amplified, super-linear losses, which neither mechanism has.
 """
 )
 
@@ -129,7 +157,7 @@ code(
     strike=0.70,
     n_autocall_obs=5,
     coupon_barrier=None,        # flat coupons, no barrier
-    geared_downside=True,       # physical settlement at strike: redemption = N * W(T) / strike when knocked in
+    physical_delivery=True,     # shares of worst-performer at strike; cash-equivalent = N * W(T) / strike
     continuous_ki=False,        # KI checked at final valuation only
 )
 
