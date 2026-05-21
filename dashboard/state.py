@@ -75,7 +75,7 @@ def _default_product() -> FCNProduct:
     """
     return FCNProduct(
         notional=DEFAULT_NOTIONAL,
-        coupon_rate=0.08 / 6.0,             # 8% p.a. paid over 6 sub-periods ≈ 1.333% per obs
+        coupon_rate=0.01,                   # 1.0% per period (12.0% p.a., monthly) — par-coupon less ~1.65% structuring margin
         obs_dates=(
             date(2026, 9, 11),
             date(2026, 10, 11),

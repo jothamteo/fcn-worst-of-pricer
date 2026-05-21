@@ -109,7 +109,7 @@ market = load_market_data(tickers=TICKERS, lookback_years=5, target_T=0.5, as_of
 
 product = FCNProduct(
     notional=50_000.0,
-    coupon_rate=0.01535,
+    coupon_rate=0.01,
     obs_dates=(
         date(2025, 12, 1),
         date(2025, 12, 31),

@@ -39,7 +39,8 @@ class FCNProduct:
         Issue size per note (e.g. 50_000).
     coupon_rate : float
         Coupon per period, as a decimal fraction of notional
-        (e.g. 0.01535 = 1.535% per month).
+        (e.g. 0.01 = 1.0% per period; for monthly observations that is
+        12.0% p.a.).
     obs_dates : tuple of date
         Observation dates: the first `n_autocall_obs` of them are autocall fixing
         dates; the last one is the final valuation date (where the maturity

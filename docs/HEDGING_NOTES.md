@@ -187,15 +187,18 @@ has to cover:
   cost (it usually does, by a little), the trade still makes money.
 
 For a textbook 1Y worst-of FCN on liquid US single names, the spread at
-issuance is typically 1–3% of notional. Under physical-delivery
-settlement (the JT-spec'd default for this repo), the trade settles to
-roughly par or slightly above in this repo's MC (50,294.24 / 50,000 =
-100.59%); the issuer's structural-margin compensation comes from the
-**funding leg + theta minus realised hedge cost** rather than from a
-visible par-discount on day 1. Under cash settlement the trade would
-clear several percentage points below par (~94% in the same engine —
-the harsher of the two for the holder), and the issuer's compensation
-would partially come from the par-to-price gap.
+issuance is typically 1–3% of notional. The headline 12% p.a. coupon used
+in this repo is the par-coupon **less** ~1.65% structuring margin, solved
+off the MC engine: at the JT-spec'd 1.0%-per-period coupon, the model
+settles to 49,177.01 / 50,000 = 98.35% of par. The remaining 1.65% is
+the desk's modelled day-1 profit margin (settles to par for the client,
+clears at 98.35% on the desk's book — the gap is the structuring margin
+that has to cover the risk components below).
+
+Under cash settlement the same engine prices several percentage points
+lower in the KI region (~6 pp lower for our barriers/vols), which would
+either require a deeper coupon trim to stay within the margin range, or
+provide additional structural margin for the same coupon.
 
 Either way, the desk's day-1 margin has to cover the same risk
 components below, and the bid–ask quoted to the client is sized

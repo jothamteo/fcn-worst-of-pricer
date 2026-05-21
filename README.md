@@ -42,7 +42,7 @@ The aim is a defensible, honest portfolio piece — not a glossy backtest. Where
 Generic worst-of FCN, 1Y tenor, quarterly observations:
 
 - **Notional:** 100
-- **Coupon:** 8% p.a., paid quarterly (2.0 per quarter), conditional on coupon barrier
+- **Coupon:** 12% p.a., paid monthly (1.0% of notional per observation), **flat** (unconditional, paid every period until autocall). This headline rate is the *par-coupon less ~1.65% structuring margin* solved off the model — see notebook 03 §3.
 - **Coupon barrier:** 70% of initial spot (worst-performer basis)
 - **Autocall barrier:** 100% of initial spot (early redemption at par + coupon if breached on an observation date; first observation excluded by default, configurable)
 - **Knock-in barrier:** 70% of initial spot, observed at maturity (European; continuous variant also implemented)
@@ -78,48 +78,49 @@ AMZN / META / MU snapshot as of 17 Oct 2025 (see notebooks/01).
 
 | | Value |
 |---|---|
-| **Final MC price** (160k antithetic paths + worst-of put CV) | **50,294.24 USD** (100.59% of notional) |
-| MC standard error (with CV) | 4.44 |
-| Same engine, no CV (antithetic only) | 50,282.60 ± 10.97 |
-| Variance-reduction ratio Var(X)/Var(X_cv) | **≈ 6.1×** |
+| **Final MC price** (160k antithetic paths + worst-of put CV) | **49,177.01 USD** (98.35% of notional) |
+| Implied **structuring margin** (par − model) | **822.99 USD** (1.65%) |
+| MC standard error (with CV) | 4.00 |
+| Same engine, no CV (antithetic only) | 49,164.86 ± 11.22 |
+| Variance-reduction ratio Var(X)/Var(X_cv) | **≈ 7.9×** |
 | corr(FCN PV, worst-of put PV) per path | **strongly negative** (see notebook 06) |
 
-(Physical-delivery settlement; switching to cash settlement drops the price by ~6 percentage points of notional in the KI region.)
+(Physical-delivery settlement; the headline coupon of 12% p.a. is the par-coupon less ~1.65% structuring margin solved off this engine. Switching to cash settlement drops the price by ~6 percentage points of notional in the KI region.)
 
 **PDE cross-validation** (single-asset reductions, 1600 × 160 grid):
 
 | Reduction | MC ± SE | PDE | \|Δ\| / SE |
 |---|---|---|---|
-| AMZN | 51,225.04 ± 4.72  | 51,211.49 | 2.87 |
-| META | 50,736.70 ± 7.22  | 50,728.07 | 1.19 |
-| MU   | 50,530.82 ± 8.23  | 50,522.83 | 0.97 |
+| AMZN | 50,472.33 ± 4.37 | 50,463.97 | 1.91 |
+| META | 49,967.70 ± 7.36 | 49,964.18 | 0.48 |
+| MU   | 49,757.28 ± 8.47 | 49,754.51 | 0.33 |
 
 All three PDE prices land well inside the MC 1-σ band — the path engine,
 payoff arithmetic, observation-grid plumbing and discount accounting all
 agree with an independent deterministic solver. (See notebook 04.)
 
 **Greeks** (bump-and-revalue MC, CRN, 80k antithetic paths, 1% spot bump,
-physical-delivery payoff):
+physical-delivery payoff at the 12% p.a. coupon):
 
 | Asset | Δ per 1% | Γ per 1%×1% | vega per vol-pt |
 |---|---|---|---|
-| AMZN | −1.89  | −0.07  | −23.20  |
-| META | +26.96 | −2.03  | −54.62  |
-| MU   | +36.21 | −0.91  | −65.64  |
+| AMZN | +10.13 | −0.92 | −23.82 |
+| META | +37.17 | −2.85 | −55.21 |
+| MU   | +47.60 | −1.38 | −66.31 |
 
-AMZN's small negative Δ is the autocall feature dominating at the
-current fixings: the basket is in-the-money enough that a higher AMZN
-spot raises the probability of an early autocall (which pays par +
-small accrued coupon — *less* than the alive continuation value), so
-the holder's PV falls slightly. META and MU still have positive Δ
-because their higher vols make KI-risk the dominant local sensitivity.
-Vegas are negative on every name (the FCN holder is short vol —
-classic for an autocall + KI structure). Pairwise correlation
-sensitivity is mostly positive (notably META–MU): the holder is
-long-correlation since decorrelated names raise the probability of
-one name dragging the worst-of through the KI barrier. Probability
-decomposition: P(autocall) ≈ 44%, P(KI at maturity) ≈ 26%,
-P(par at maturity, no AC) ≈ 30%.
+All three names have **positive Δ** at the at-the-money fixings — the
+holder is long the basket, since every name moving up reduces KI risk
+and pushes the worst-of toward the autocall (and there is enough
+coupon to make the autocall payoff attractive enough that a faster
+autocall is not a loss on this side). Vegas are negative on every
+name (the FCN holder is short vol — classic for an autocall + KI
+structure). Pairwise correlation sensitivities (per +0.01 in ρ):
+META–MU **+3.64**, AMZN–META **+1.84**, AMZN–MU **+1.05** —
+all positive, so the holder is long-correlation since decorrelated
+names raise the probability of one name dragging the worst-of through
+the KI barrier. Probability decomposition (path dynamics, independent
+of coupon): P(autocall) ≈ 44%, P(KI at maturity) ≈ 26%, P(par at
+maturity, no AC) ≈ 30%.
 
 ## Honest findings
 

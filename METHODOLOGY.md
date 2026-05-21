@@ -48,7 +48,7 @@ Notation:
 - Worst performer at time $t$: $W(t) = \min_i S_i(t)/S_i(0)$.
 - Observation dates $\mathcal{T}_{obs} = \{t_1, \dots, t_M\}$ with $t_M = T$.
 - Coupon barrier $B_c$ (default 0.70), autocall barrier $B_{ac}$ (1.00), knock-in barrier $B_{ki}$ (0.65).
-- Per-period coupon $c$ (e.g. 8% p.a. quarterly $\Rightarrow c = 0.02 \cdot N$).
+- Per-period coupon $c$ (e.g. 12% p.a. monthly $\Rightarrow c = 0.01 \cdot N$).
 
 ### Cashflows along a path
 

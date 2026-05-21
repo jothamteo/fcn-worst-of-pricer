@@ -122,7 +122,7 @@ print(market.summary())
 
 product = FCNProduct(
     notional=PRICER_NOTIONAL,
-    coupon_rate=0.01535,
+    coupon_rate=0.01,
     obs_dates=(
         date(2025, 12, 1),
         date(2025, 12, 31),

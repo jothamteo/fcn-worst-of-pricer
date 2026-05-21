@@ -70,9 +70,12 @@ pd.set_option('display.float_format', lambda x: f'{x:,.4f}')
 md(
     """## Setup
 
-JT-spec'd AMZN/META/MU FCN, 1Y nominal tenor (~199 calendar days from
-issue to maturity), 8% p.a. coupon paid in 6 sub-periods, autocall at
-100% (5 observation dates), European KI at 70%."""
+JT-spec'd AMZN/META/MU FCN, ~6.5-month tenor (199 calendar days from
+issue to maturity), **12.0% p.a. coupon** (1.0% per monthly observation, flat),
+autocall at 100% (5 observation dates), European KI / strike at 70%, settled
+by physical delivery on KI. Coupon is set to the par-coupon less ~1.65%
+structuring margin — model fair value of ~98.4% of notional, the rest is the
+desk's day-1 margin."""
 )
 code(
     """ISSUE_DATE = date(2025, 10, 17)
@@ -80,7 +83,7 @@ TICKERS = ("AMZN", "META", "MU")
 market = load_market_data(tickers=TICKERS, lookback_years=5, target_T=0.5, as_of=ISSUE_DATE)
 product = FCNProduct(
     notional=50_000.0,
-    coupon_rate=0.01535,
+    coupon_rate=0.01,
     obs_dates=(
         date(2025, 12, 1),
         date(2025, 12, 31),

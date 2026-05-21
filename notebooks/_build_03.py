@@ -39,7 +39,7 @@ path through maturity at **4 May 2026** to compare model vs. reality.
 | Initial valuation | 17 Oct 2025 |
 | Final valuation | 30 Apr 2026 |
 | Maturity | 4 May 2026 |
-| Coupon | 1.535% per period, **flat** (18.42% p.a., monthly) |
+| Coupon | 1.0% per period, **flat** (12.0% p.a., monthly) — par-coupon less ~1.65% structuring margin |
 | Autocall barrier | 100% of initial, worst-of basis |
 | Strike (= KI) | 70% of initial, **physical delivery** at strike (shares of worst-performer) |
 | KI observation | European (at final valuation only) |
@@ -135,7 +135,7 @@ year fractions used by the simulation grid."""
 code(
     """product = FCNProduct(
     notional=50_000.0,
-    coupon_rate=0.01535,
+    coupon_rate=0.01,
     obs_dates=(
         date(2025, 12, 1),
         date(2025, 12, 31),
