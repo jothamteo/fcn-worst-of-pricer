@@ -180,16 +180,23 @@ def initial_greeks() -> dict:
     """Return ``{price, delta, vega, cega_pair}`` at the *initial* snapshot.
 
     Cached in session_state because every panel needs it for attribution.
-    Uses Precise MC at higher path count for accuracy at the linearisation
-    point — this is run once on first load, so cost is one-shot.
+    Greeks are computed via Precise MC (the grid doesn't store sensitivities).
+    Price is overridden with the **grid-interpolated** value so the P&L
+    panel's "Issue price" matches the source MTM is interpolated from when
+    current == initial — otherwise the two estimators (precise MC vs grid)
+    disagree by ≈$400 of MC noise and the panel shows a spurious P&L on a
+    fresh load.
     """
     cached = st.session_state.get("initial_full_state")
     if cached is not None:
         return cached
     initial = st.session_state["initial"]
     # 10k paths keeps peak memory well under 100 MB and cuts the cold-start
-    # Greeks pass roughly in half on Streamlit Cloud's shared CPU. SE is
-    # ~1.4× worse than 20k — negligible at the linearisation point.
+    # Greeks pass roughly in half on Streamlit Cloud's shared CPU.
     out = precise_greeks(initial, st.session_state["product"], n_paths=10_000, seed=20260101)
+    # Override the precise-MC price with the grid lookup so Issue == MTM
+    # at current == initial (no spurious P&L noise on cold start).
+    grid = ensure_grid()
+    out["price"] = float(grid.interpolate(initial)["price"])
     st.session_state["initial_full_state"] = out
     return out
