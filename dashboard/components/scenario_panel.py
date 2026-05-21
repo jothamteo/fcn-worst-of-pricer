@@ -200,7 +200,7 @@ def render() -> None:
         )
         c_vol = st.slider(
             "Basket vol shift (abs vol pts)", -0.20, +0.30, 0.0, 0.01, format="%+.2f",
-            help="Absolute change in vol points applied to every implied vol.",
+            help="Absolute change in vol points applied to every realised vol.",
         )
         c_corr = st.slider(
             "Off-diagonal corr shift", -0.30, +0.30, 0.0, 0.01, format="%+.2f",

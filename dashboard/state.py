@@ -61,44 +61,64 @@ _DEFAULT_CURRENT_DIVS = _DEFAULT_ISSUE_DIVS.copy()
 _DEFAULT_CURRENT_CORR = _DEFAULT_ISSUE_CORR.copy()
 _DEFAULT_CURRENT_RATE = _DEFAULT_ISSUE_RATE
 
-DEFAULT_ISSUE_DATE = date(2026, 2, 11)
-DEFAULT_AS_OF_DATE = date(2026, 5, 11)
+DEFAULT_ISSUE_DATE = date(2026, 5, 21)
+DEFAULT_AS_OF_DATE = date(2026, 5, 21)
 DEFAULT_NOTIONAL = 1_000_000.0
+
+# ---------------------------------------------------------------------------
+# Standard FCN structure — shared by dashboard and notebooks.
+# Changing any of these requires updating notebooks/_build_*.py to match.
+# `tests/test_dashboard_consistency.py` enforces structural equality.
+# ---------------------------------------------------------------------------
+
+STANDARD_COUPON_RATE_PER_PERIOD = 0.01     # 1.0% per monthly observation = 12.0% p.a.
+STANDARD_AUTOCALL_BARRIER = 1.00
+STANDARD_STRIKE = 0.70
+STANDARD_N_AC_OBS = 5
+STANDARD_N_OBS_TOTAL = 6
+STANDARD_PHYSICAL_DELIVERY = True
+STANDARD_COUPON_BARRIER = None
+STANDARD_CONTINUOUS_KI = False
+STANDARD_TENOR_MONTHS = 6
+STANDARD_OBS_INTERVAL_MONTHS = 1
+STANDARD_PAY_DELAY_DAYS = 2                # T+2 calendar days
 
 
 def _default_product() -> FCNProduct:
-    """A 1Y worst-of FCN on the default basket — 5 AC obs + maturity check.
+    """The standard 6-month worst-of FCN on the default basket.
 
-    The schedule deliberately places the first observation well past the
-    default "today" (2026-05-11) so the dashboard is showing a *live*
-    trade with all observations still ahead.
+    Structure matches the notebook product exactly (5 AC obs + maturity
+    check, 100% AC, 70% KI, physical delivery, 1.0%/period flat coupon).
+    Only the calendar dates differ — the dashboard places the trade
+    forward-looking from today so all observations are ahead; the
+    notebooks place the trade in the past for historical replay.
     """
     return FCNProduct(
         notional=DEFAULT_NOTIONAL,
-        coupon_rate=0.01,                   # 1.0% per period (12.0% p.a., monthly) — par-coupon less ~1.65% structuring margin
+        coupon_rate=STANDARD_COUPON_RATE_PER_PERIOD,
         obs_dates=(
-            date(2026, 9, 11),
-            date(2026, 10, 11),
-            date(2026, 11, 11),
-            date(2026, 12, 11),
-            date(2027, 1, 11),
-            date(2027, 2, 11),              # final valuation (KI check)
+            date(2026, 6, 21),
+            date(2026, 7, 21),
+            date(2026, 8, 21),
+            date(2026, 9, 21),
+            date(2026, 10, 21),
+            date(2026, 11, 21),              # final valuation (KI check)
         ),
         pay_dates=(
-            date(2026, 9, 14),
-            date(2026, 10, 14),
-            date(2026, 11, 14),
-            date(2026, 12, 14),
-            date(2027, 1, 14),
-            date(2027, 2, 16),              # 11th is a Thursday; +3 BD = the 16th
+            date(2026, 6, 23),
+            date(2026, 7, 23),
+            date(2026, 8, 23),
+            date(2026, 9, 23),
+            date(2026, 10, 23),
+            date(2026, 11, 23),              # maturity payment (T+2)
         ),
         issue_date=DEFAULT_ISSUE_DATE,
-        autocall_barrier=1.00,
-        strike=0.70,
-        n_autocall_obs=5,
-        coupon_barrier=None,
-        physical_delivery=True,
-        continuous_ki=False,
+        autocall_barrier=STANDARD_AUTOCALL_BARRIER,
+        strike=STANDARD_STRIKE,
+        n_autocall_obs=STANDARD_N_AC_OBS,
+        coupon_barrier=STANDARD_COUPON_BARRIER,
+        physical_delivery=STANDARD_PHYSICAL_DELIVERY,
+        continuous_ki=STANDARD_CONTINUOUS_KI,
     )
 
 

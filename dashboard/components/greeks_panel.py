@@ -46,7 +46,7 @@ def render() -> None:
         "Net Vega (per +1.0 vol)",
         f"${total_vega:,.0f}",
         help=(
-            "Σᵢ Vegaᵢ for a parallel shift of every implied vol by +1.0. "
+            "Σᵢ Vegaᵢ for a parallel shift of every realised vol by +1.0. "
             "Divide by 100 to get vega per +1 vol-pt."
         ),
     )

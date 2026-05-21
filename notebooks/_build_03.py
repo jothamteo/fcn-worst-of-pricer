@@ -35,16 +35,15 @@ path through maturity at **4 May 2026** to compare model vs. reality.
 |---|---|
 | Underlyings | AMZN, META, MU |
 | Notional | USD 50,000 |
-| Issue date | 31 Oct 2025 |
-| Initial valuation | 17 Oct 2025 |
-| Final valuation | 30 Apr 2026 |
-| Maturity | 4 May 2026 |
-| Coupon | 1.0% per period, **flat** (12.0% p.a., monthly) — par-coupon less ~1.65% structuring margin |
+| Issue date | 17 Oct 2025 |
+| Final valuation | 17 Apr 2026 (6 months from issue) |
+| Maturity payment | 19 Apr 2026 (T+2) |
+| Coupon | 1.0% per period, **flat** (12.0% p.a., monthly) |
 | Autocall barrier | 100% of initial, worst-of basis |
 | Strike (= KI) | 70% of initial, **physical delivery** at strike (shares of worst-performer) |
 | KI observation | European (at final valuation only) |
-| Autocall fixings | 1 Dec '25, 31 Dec '25, 2 Feb '26, 2 Mar '26, 31 Mar '26 |
-| Payment dates | 3 Dec '25, 5 Jan '26, 4 Feb '26, 4 Mar '26, 2 Apr '26, 4 May '26 |
+| Autocall fixings | 17 Nov '25, 17 Dec '25, 17 Jan '26, 17 Feb '26, 17 Mar '26 |
+| Payment dates | 19 Nov '25, 19 Dec '25, 19 Jan '26, 19 Feb '26, 19 Mar '26, 19 Apr '26 |
 
 **What "use historical prices" means here**: market inputs are taken **as-of 17 Oct 2025**
 (no look-ahead — realised vol/corr from a 5Y window ending 17 Oct 2025, Treasury yields
@@ -137,20 +136,20 @@ code(
     notional=50_000.0,
     coupon_rate=0.01,
     obs_dates=(
-        date(2025, 12, 1),
-        date(2025, 12, 31),
-        date(2026, 2, 2),
-        date(2026, 3, 2),
-        date(2026, 3, 31),
-        date(2026, 4, 30),  # final valuation
+        date(2025, 11, 17),
+        date(2025, 12, 17),
+        date(2026, 1, 17),
+        date(2026, 2, 17),
+        date(2026, 3, 17),
+        date(2026, 4, 17),  # final valuation
     ),
     pay_dates=(
-        date(2025, 12, 3),
-        date(2026, 1, 5),
-        date(2026, 2, 4),
-        date(2026, 3, 4),
-        date(2026, 4, 2),
-        date(2026, 5, 4),   # maturity
+        date(2025, 11, 19),
+        date(2025, 12, 19),
+        date(2026, 1, 19),
+        date(2026, 2, 19),
+        date(2026, 3, 19),
+        date(2026, 4, 19),   # maturity
     ),
     issue_date=ISSUE_DATE,
     autocall_barrier=1.00,

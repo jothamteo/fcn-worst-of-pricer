@@ -133,7 +133,7 @@ def render() -> None:
             value=float(np.mean(current.vols - initial.vols)),
             step=0.01, format="%+.2f",
             help=(
-                "Absolute change in implied vol, applied to every underlying. "
+                "Absolute change in realised vol, applied to every underlying. "
                 "+0.10 = +10 vol-points. The grid axes go from −10 to +20 "
                 "vol-pts; outside that range the panel switches to Precise."
             ),

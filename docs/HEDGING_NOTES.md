@@ -186,25 +186,14 @@ has to cover:
   that if the realised hedge cost comes in higher than the modelled hedge
   cost (it usually does, by a little), the trade still makes money.
 
-For a textbook 1Y worst-of FCN on liquid US single names, the spread at
-issuance is typically 1–3% of notional. The headline 12% p.a. coupon used
-in this repo is the par-coupon **less** ~1.65% structuring margin, solved
-off the MC engine: at the JT-spec'd 1.0%-per-period coupon, the model
-settles to 49,177.01 / 50,000 = 98.35% of par. The remaining 1.65% is
-the desk's modelled day-1 profit margin (settles to par for the client,
-clears at 98.35% on the desk's book — the gap is the structuring margin
-that has to cover the risk components below).
-
-Under cash settlement the same engine prices several percentage points
-lower in the KI region (~6 pp lower for our barriers/vols), which would
-either require a deeper coupon trim to stay within the margin range, or
-provide additional structural margin for the same coupon.
-
-Either way, the desk's day-1 margin has to cover the same risk
-components below, and the bid–ask quoted to the client is sized
-accordingly. If the trade runs cleanly the desk earns most of it; if
-it runs into a real gap or a correlation shock, much of it goes back
-out the door covering the reserves it was sized to compensate for.
+For a textbook 6M worst-of FCN on liquid US single names, the spread at
+issuance is typically 1–3% of notional. At the JT-spec'd 1.0%-per-period
+coupon (12% p.a.) the model settles to 49,493.82 / 50,000 = 98.99% of
+par — a ~1.0% gap to par that the desk's day-1 margin has to cover
+along with the risk components below. If the trade runs cleanly the
+desk earns most of it; if it runs into a real gap or a correlation
+shock, much of it goes back out the door covering the reserves it was
+sized to compensate for.
 
 That asymmetric P&L profile — a fixed upside (the structuring margin) and
 a stochastic downside (the realised hedge cost minus the modelled hedge
