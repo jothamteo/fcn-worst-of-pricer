@@ -75,9 +75,8 @@ def render() -> None:
 
     st.markdown("### Attribution waterfall")
     st.caption(
-        "First-order decomposition of the MTM move using **initial-snapshot** "
-        "Greeks. Bars left → right add up to the total P&L. The residual "
-        "captures Γ, cross-terms, and any MC noise."
+        "Greek-by-Greek breakdown of MTM P&L. Bars sum to total; "
+        "Residual captures Γ, cross-terms, and MC noise."
     )
 
     _render_waterfall(attr)
