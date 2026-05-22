@@ -91,8 +91,12 @@ def render() -> None:
         # `black_scholes_call` returns vega per +1 vol pt (i.e. +0.01).
         listed_vegas[t] = vega_pt * 100.0           # rescale to per +1.0 in vol
         listed_prices[t] = price
-    # Dealer carries +ve vega from selling FCN → dealer_vega = +holder_vega.
-    dealer_vegas = {t: float(vega[i]) for i, t in enumerate(tickers)}
+    # Dealer is the *mirror* of the holder: dealer_vega = -holder_vega.
+    # Holder is short vol (negative vega) → dealer is long vol (positive
+    # vega) → to neutralise, dealer SELLS listed options. The previous
+    # version mistakenly fed +holder_vega here, producing a buy-side
+    # recommendation. Matches notebook 09's hedge construction.
+    dealer_vegas = {t: -float(vega[i]) for i, t in enumerate(tickers)}
     vega_rows = compute_vega_hedge(
         vegas=dealer_vegas,
         listed_option_vegas=listed_vegas,

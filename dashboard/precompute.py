@@ -437,7 +437,11 @@ def precise_greeks(
         "price": result.price,
         "delta": np.asarray(result.delta),
         "vega": np.asarray(result.vega),
-        "cega_pair": np.asarray(result.rho_pair) / 5.0,  # bump was 0.05 → per 0.01
+        # mc_greeks_bump returns rho_pair as the per-unit gradient
+        # (the bump cancels in the central difference). Divide by 100 to
+        # express it per +0.01 in ρ — matches notebooks 05 + 07. Was /5
+        # by mistake which made dashboard cega 20× the notebook value.
+        "cega_pair": np.asarray(result.rho_pair) / 100.0,
         "projection": None,
         "std_errors": result.standard_errors,
     }

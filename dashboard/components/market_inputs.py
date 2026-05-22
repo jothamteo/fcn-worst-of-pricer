@@ -124,7 +124,7 @@ def render() -> None:
     # -----------------------------------------------------------------------
     # Vols
     # -----------------------------------------------------------------------
-    st.sidebar.markdown("**Implied vols**")
+    st.sidebar.markdown("**Realised vols** (5Y window)")
     new_vols = np.asarray(initial.vols, dtype=float).copy()
     if basket_mode:
         basket_vol_shift = st.sidebar.slider(
@@ -151,7 +151,7 @@ def render() -> None:
                 min_value=0.05, max_value=1.00,
                 value=float(current.vols[i]),
                 step=0.005, format="%.3f",
-                help=f"Implied vol for {t}. Issue level was {100 * initial.vols[i]:.1f}%.",
+                help=f"Realised vol for {t} (5Y window). Issue level was {100 * initial.vols[i]:.1f}%.",
                 key=f"vol_{t}",
             )
 

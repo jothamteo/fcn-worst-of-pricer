@@ -70,12 +70,11 @@ pd.set_option('display.float_format', lambda x: f'{x:,.4f}')
 md(
     """## Setup
 
-JT-spec'd AMZN/META/MU FCN, ~6.5-month tenor (199 calendar days from
-issue to maturity), **12.0% p.a. coupon** (1.0% per monthly observation, flat),
-autocall at 100% (5 observation dates), European KI / strike at 70%, settled
-by physical delivery on KI. Coupon is set to the par-coupon less ~1.65%
-structuring margin — model fair value of ~98.4% of notional, the rest is the
-desk's day-1 margin."""
+JT-spec'd AMZN/META/MU FCN, **exactly 6-month tenor** (issue 17 Oct 2025 →
+final valuation 17 Apr 2026 = 182 days; maturity payment 19 Apr 2026 T+2),
+**12.0% p.a. coupon** (1.0% per monthly observation, flat), autocall at 100%
+(5 observation dates), European KI / strike at 70%, settled by physical
+delivery on KI."""
 )
 code(
     """ISSUE_DATE = date(2025, 10, 17)

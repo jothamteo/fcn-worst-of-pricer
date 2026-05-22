@@ -39,13 +39,12 @@ The aim is a defensible, honest portfolio piece — not a glossy backtest. Where
 
 ## The product
 
-Generic worst-of FCN, 1Y tenor, quarterly observations:
+Generic worst-of FCN, **6-month tenor**, monthly observations:
 
-- **Notional:** 100
-- **Coupon:** 12% p.a., paid monthly (1.0% of notional per observation), **flat** (unconditional, paid every period until autocall).
-- **Coupon barrier:** 70% of initial spot (worst-performer basis)
-- **Autocall barrier:** 100% of initial spot (early redemption at par + coupon if breached on an observation date; first observation excluded by default, configurable)
-- **Knock-in barrier:** 70% of initial spot, observed at maturity (European; continuous variant also implemented)
+- **Notional:** 100 in math notation (textbook convention); 50,000 in the notebooks (retail-ticket scale); 1,000,000 in the dashboard (institutional-ticket scale). Price and Greeks are exactly linear in notional, so every percentage metric is identical across the three.
+- **Coupon:** 12% p.a., paid monthly (1.0% of notional per observation), **flat** (unconditional, paid every period until autocall — no coupon barrier).
+- **Autocall barrier:** 100% of initial spot (early redemption at par + coupon if the worst-performer is at or above the barrier on any of the 5 autocall observation dates)
+- **Knock-in barrier:** 70% of initial spot, observed at maturity only (European; continuous-monitoring variant also implemented in the library)
 - **Settlement method (downside, if KI triggered):** **physical delivery** of shares of the worst-performing underlying at the strike price. The client receives approximately `N / (strike × S_worst(0))` shares; fractional shares are settled in cash. The pricer values this at the cash-equivalent `N · W(T) / strike` (the fractional-share rounding residual is negligible relative to MC SE). Switch to **cash settlement** (`physical_delivery=False`) for the harsher 1-for-1 cash payoff `N · W(T)`.
 - **Maturity payoff (if not autocalled):**
   - Worst performer ≥ 100%: par + final coupon
@@ -128,12 +127,14 @@ All three names have positive Δ (holder is long the basket), negative vega (sho
   the full spot range.
 
 - **The worst-of put control variate exploits exactly the loss tail.**
-  CV correlation reaches −0.84, giving 3.4× variance reduction
-  (≈ 1.85× tighter SE for the same path budget). The mechanism is
-  visible in the per-path X-vs-Y scatter (notebook 06): the
-  autocalled and par-at-maturity paths sit at Y = 0; the
-  knocked-in paths form a tight anti-correlated cloud that the CV
-  effectively averages out.
+  Strongly negative ρ(FCN_PV, worst_of_put_PV) per path → **~7.5× variance
+  reduction** at the current 6M / 12% coupon spec (≈ 2.7× tighter SE for
+  the same path budget). The mechanism is visible in the per-path X-vs-Y
+  scatter (notebook 06): autocalled and par-at-maturity paths sit at Y = 0;
+  the knocked-in paths form a tight anti-correlated cloud that the CV
+  effectively averages out. The VR ratio grows as the coupon shrinks,
+  because the FCN's PV becomes more DIP-dominated and the worst-of put
+  CV is essentially a vanilla version of the DIP.
 
 - **Correlation sensitivity is positive on every pair.** The FCN
   holder is long correlation — decorrelated names raise the
