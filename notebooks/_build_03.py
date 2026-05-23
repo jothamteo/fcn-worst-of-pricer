@@ -78,27 +78,19 @@ np.set_printoptions(suppress=True, precision=4)
 md(
     r"""### Settlement method: physical delivery vs cash settlement
 
-This FCN settles the downside (KI-triggered) leg by **physical delivery**: if
-the worst-performing underlying finishes below the strike at maturity, the
-issuer delivers approximately $N / (K \cdot S_{\text{worst}}(0))$ shares of
-that underlying to the client, with fractional shares settled in cash. The
-client ends up holding a concentrated long position in the worst-performer at
-the strike-level purchase price.
+Downside (KI-triggered) leg: if the worst-performer finishes below the
+strike at maturity, the issuer delivers approximately
+$N / (K \cdot S_{\text{worst}}(0))$ shares of that name to the client
+(fractional shares cash-settled). The pricer values this at the
+cash-equivalent $N \cdot W(T) / K$, continuous at $W(T) = K$ — no cliff
+at the strike.
 
-The pricer values this at the cash-equivalent fair value $N \cdot W(T) / K$ —
-the fractional-share rounding residual is negligible relative to MC standard
-error, so the payoff is reported as a continuous function of $W(T)$ rather
-than an integer share count. Break-even is exactly at $W(T) = K$, so the
-payoff is *continuous* at the strike (no cliff).
-
-The library also supports **cash settlement** (`physical_delivery=False`),
-where the downside leg is $N \cdot W(T)$ — discontinuous at the strike and
-*harsher* than physical delivery by a factor of $1/K$ in the KI region. Cash
-settlement is non-standard for retail FCNs in Asia; the JT-spec'd structure
-here is physical delivery.
-
-Neither is "geared" in the structured-products sense — gearing implies
-amplified, super-linear losses, which neither mechanism has.
+The library also supports **cash settlement** (`physical_delivery=False`):
+the strike is only the trigger, and the payoff $N \cdot W(T)$ scales
+directly with the worst-of's terminal performance — no strike-level
+conversion. Harsher than physical delivery by a factor of $1/K$ in the
+KI region. The JT-spec'd structure here is physical delivery; cash
+settlement is non-standard for retail FCNs in Asia.
 """
 )
 
