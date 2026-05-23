@@ -45,7 +45,7 @@ is the "MC Greeks are noisy near barriers" demonstration that motivates
 all the variance-reduction work in Phase 6.
 
 **Reading order**
-1. Setup — same JT-spec'd 3-asset FCN as Phase 3.
+1. Setup — same 3-asset FCN as in notebook 03.
 2. The 3-asset Greeks table (MC only — PDE is single-asset, Phase 4).
 3. Single-asset cross-validation: MC vs PDE Greeks should agree well in the
    middle of the distribution; the interesting failure mode is at the
@@ -82,7 +82,7 @@ np.set_printoptions(suppress=True, precision=6)
 md(
     """## 1. Setup — re-use the Phase 3 market snapshot
 
-Same as-of-date AMZN/META/MU basket and JT-spec'd 6-observation FCN."""
+Same as-of-date AMZN/META/MU basket and the same 6-observation FCN."""
 )
 code(
     """ISSUE_DATE = date(2025, 10, 17)

@@ -45,7 +45,7 @@ correlation becomes continuous — which is exactly what kills the
 bump-and-revalue noise at the barriers.
 
 **Reading order**
-1. Setup — same JT-spec'd AMZN/META/MU FCN as notebooks 03 / 05.
+1. Setup — same AMZN/META/MU FCN as in notebooks 03 / 05.
 2. Δ-vs-spot scan: hard MC (ribbon explodes at the barriers) vs smoothed
    MC (clean) vs PDE (reference).
 3. Γ-vs-spot scan: the more dramatic demonstration — hard MC Γ is dominated
@@ -97,7 +97,7 @@ np.set_printoptions(suppress=True, precision=6)
 md(
     """## 1. Setup — reuse the Phase 3 market snapshot
 
-Same as-of-date AMZN/META/MU basket and JT-spec'd 6-observation FCN. We
+Same as-of-date AMZN/META/MU basket and the same 6-observation FCN. We
 reduce to AMZN-only for the spot scan because the comparison against the
 1D PDE is what makes the Γ plot tell a clean story."""
 )

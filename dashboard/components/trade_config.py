@@ -55,5 +55,5 @@ def render() -> None:
         )
         st.caption(
             "Editable trade-structure fields ship in a later phase. The Phase 1 "
-            "skeleton uses the JT-spec'd 6-month worst-of FCN with 12% p.a. coupon (1.0% per monthly observation)."
+            "skeleton uses the default 6-month worst-of FCN with 12% p.a. coupon (1.0% per monthly observation)."
         )

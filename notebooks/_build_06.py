@@ -88,7 +88,7 @@ np.set_printoptions(suppress=True, precision=6)
 
 # ---------------------------------------------------------------------------
 md(
-    """## 1. Setup — same JT-spec'd 3-asset FCN
+    """## 1. Setup — same 3-asset FCN as in notebook 03
 
 We're reusing the AMZN/META/MU snapshot from Phase 3 and the same product."""
 )

@@ -70,7 +70,7 @@ pd.set_option('display.float_format', lambda x: f'{x:,.4f}')
 md(
     """## Setup
 
-JT-spec'd AMZN/META/MU FCN, **exactly 6-month tenor** (issue 17 Oct 2025 →
+AMZN/META/MU FCN, **exactly 6-month tenor** (issue 17 Oct 2025 →
 final valuation 17 Apr 2026 = 182 days; maturity payment 19 Apr 2026 T+2),
 **12.0% p.a. coupon** (1.0% per monthly observation, flat), autocall at 100%
 (5 observation dates), European KI / strike at 70%, settled by physical
@@ -320,7 +320,7 @@ deliberately out of scope:
    continuous-KI monitoring (`continuous_ki=True`); the 1D PDE engine
    does not — implementing it would require an absorbing-boundary
    condition along the strike between observation dates. The
-   JT-spec'd structure is European KI; the gap is documented in
+   default structure is European KI; the gap is documented in
    METHODOLOGY §4.
 4. **Bump-Γ noise.** As the Δ-vs-spot plot shows, MC Γ near the
    barriers is structurally noisy. Real desks deploy

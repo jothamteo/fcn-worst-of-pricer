@@ -94,7 +94,7 @@ class FCNProduct:
         ``W(T) < K``, so ``N · W(T) / K < N`` always holds. Default is
         False — callers should pick the settlement method explicitly. The
         dashboard and notebooks for this project set ``physical_delivery=True``
-        because that is the JT-spec'd structure.
+        because that is the default structure for this project.
     continuous_ki : bool
         If True, knock-in is triggered when the worst-of touches the strike
         on ANY simulated grid point during the life of the note. If False

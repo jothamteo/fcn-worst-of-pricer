@@ -29,7 +29,7 @@ This notebook prices a **6-month, monthly-observed worst-of FCN** on AMZN, META,
 issued at **17 Oct 2025**, then replays the *actual* payoff on the realised price
 path through maturity at **4 May 2026** to compare model vs. reality.
 
-**Product spec (JT-supplied)**
+**Product spec**
 
 | Field | Value |
 |---|---|
@@ -89,7 +89,7 @@ The library also supports **cash settlement** (`physical_delivery=False`):
 the strike is only the trigger, and the payoff $N \cdot W(T)$ scales
 directly with the worst-of's terminal performance — no strike-level
 conversion. Harsher than physical delivery by a factor of $1/K$ in the
-KI region. The JT-spec'd structure here is physical delivery; cash
+KI region. The default structure here is physical delivery; cash
 settlement is non-standard for retail FCNs in Asia.
 """
 )
@@ -118,7 +118,7 @@ print(market.summary())
 
 # ---------------------------------------------------------------------------
 md(
-    """## 2. Product spec — the JT-supplied parameters
+    """## 2. Product spec
 
 `FCNProduct` validates the date schedule and the barrier ordering, and exposes
 year fractions used by the simulation grid."""

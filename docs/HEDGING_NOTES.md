@@ -7,10 +7,10 @@ priced or hedged one. This document is the bridge from "FCN pricer
 notebook" to "what the dealing desk is actually doing all day." Kept short
 on purpose: 3–4 pages, no derivations the textbooks already do well.
 
-The product is the textbook worst-of FCN on three semiconductor names —
-1Y tenor, quarterly observations, 100% autocall barrier, 70% European
-knock-in, conditional or flat coupons. The mechanics are in the main
-README and METHODOLOGY; the *hedging* is what this doc covers.
+The product is the textbook worst-of FCN on three large-cap tech names
+(AMZN, META, MU) — 6-month tenor, monthly observations, 100% autocall
+barrier, 70% European knock-in, flat coupons. The mechanics are in the
+main README and METHODOLOGY; the *hedging* is what this doc covers.
 
 ---
 
@@ -187,7 +187,7 @@ has to cover:
   cost (it usually does, by a little), the trade still makes money.
 
 For a textbook 6M worst-of FCN on liquid US single names, the spread at
-issuance is typically 1–3% of notional. At the JT-spec'd 1.0%-per-period
+issuance is typically 1–3% of notional. At the default 1.0%-per-period
 coupon (12% p.a.) the model settles to 49,493.82 / 50,000 = 98.99% of
 par — a ~1.0% gap to par that the desk's day-1 margin has to cover
 along with the risk components below. If the trade runs cleanly the

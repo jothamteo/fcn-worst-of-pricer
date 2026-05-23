@@ -46,7 +46,7 @@ is the cheapest, strongest evidence we have that the MC engine is wired up
 correctly.
 
 **Reading order**
-1. Setup: 1-asset reduction of the JT-spec'd AMZN/META/MU FCN (we run it
+1. Setup: 1-asset reduction of the AMZN/META/MU FCN (we run it
    separately for each name to triangulate).
 2. PDE price + diagnostics.
 3. MC price for the same product → check `|PDE − MC| < 3 · SE`.
@@ -370,7 +370,7 @@ with an independent solver.
    default). A continuous-KI variant is a straightforward extension of the
    payoff logic in MC; in the PDE it would require an absorbing-boundary
    condition along the strike level for $t \in (t_{j-1}, t_j)$, which is
-   substantially more code. We've chosen not to do it: the JT-spec'd
+   substantially more code. We've chosen not to do it: the default
    structure is European KI.
 
 **On the PDE's runtime.** Roughly 200 ms per priced product on a daily
