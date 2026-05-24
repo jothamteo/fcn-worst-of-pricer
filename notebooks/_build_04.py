@@ -37,13 +37,11 @@ which the Monte Carlo engine is validated.
 
 **Why bother with the cross-validation at all?**
 The MC pricer is the one we use in production (it scales to any
-$d$-dimensional basket; the PDE does not). But MC has two sources of error
-that aren't always easy to bound: discretisation noise around the discrete
-barriers, and standard Monte Carlo variance. The PDE has neither (the
-barriers are applied exactly at the observation date, and there's no
-sampling). Agreement to within a few MC standard errors on the 1-asset case
-is the cheapest, strongest evidence we have that the MC engine is wired up
-correctly.
+$d$-dimensional basket; the PDE does not). The MC engine has unavoidable
+random noise plus barrier-related noise; the PDE has neither. If they agree
+on the single-asset reduction within a few MC standard errors, both engines
+are almost certainly correct — and the PDE was much cheaper to build than
+any other equally strong validation.
 
 **Reading order**
 1. Setup: 1-asset reduction of the AMZN/META/MU FCN (we run it
