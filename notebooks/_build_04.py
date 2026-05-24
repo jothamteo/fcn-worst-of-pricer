@@ -225,13 +225,21 @@ observation-grid mapping, or the path generation."""
 md(
     """## 4. Convergence study (space and time)
 
-We run the PDE at increasing grid resolutions and watch the price converge.
-Crank–Nicolson is **second-order in both space and time** for smooth payoffs,
-but the discrete-observation events (autocall + coupon decisions) inject
-non-smoothness at known levels and times — in practice we still see roughly
-second-order convergence away from the barriers.
+The PDE solves on a grid in two directions: **space** (different spot
+levels) and **time** (different points along the life of the trade). If
+the grid is too coarse the price has discretisation error; refine the
+grid and the error shrinks. The question is *how fast*.
 
-We anchor against the highest-resolution run as a proxy for the true price."""
+Crank–Nicolson is designed to be **second-order accurate** in both: cut
+the grid spacing in half, the error should drop by ~4× (not 2×). We
+expect to see that in the plots below — log-log lines that fall with
+slope −2.
+
+We run the PDE at six grid resolutions in each direction and anchor
+against the highest-resolution run as a proxy for the true price.
+Discrete-observation events (autocall checks at fixed dates) create
+small kinks in the value surface, so convergence won't be perfectly
+clean — but second-order behaviour should still be visible."""
 )
 code(
     """# Use AMZN's calibration for the convergence sweep.
@@ -294,22 +302,42 @@ fig.tight_layout(); plt.show()
 """
 )
 md(
-    """**Interpretation.** Both panels show roughly $n^{-2}$ convergence, the
-expected order for Crank–Nicolson in space and time on a smooth-ish payoff.
-The constant on the time axis is larger because the discontinuities live at
-specific *times* (the obs dates) — refining time resolves them better than
-refining space (which never has to "see" the time-domain kinks)."""
+    """**What to look for.** Both panels are log-log: a straight line with
+slope −2 means second-order convergence. Doubling the grid in either
+direction → roughly 4× smaller error. We see that pattern in both
+panels, matching the dashed reference line.
+
+The time panel is *steeper* (error drops faster as we refine time) than
+the space panel. That's because the autocall events live at specific
+dates — refining time resolves them better, while refining space alone
+doesn't help with kinks in the time direction. Both still hit the
+second-order ceiling once the grid is fine enough."""
 )
 
 # ---------------------------------------------------------------------------
 md(
     """## 5. The value surface $V(x, t=0)$
 
-The PDE engine returns the full grid of values at $t=0$. Plotting against
-log-spot lets us see how the embedded options pay off across the spot
-distribution — the autocall (S/S₀ ≥ 1.00) caps the upside near `notional`,
-and the KI strike (S/S₀ < 0.70) drags the downside down linearly. We
-overlay the AMZN single-asset PDE result."""
+A nice side-effect of solving with a PDE: we get the FCN's value at
+*every* spot level for free, not just at today's spot. Monte Carlo
+gives one number; the PDE gives the entire curve `V` as a function of
+`S/S₀`.
+
+The chart below plots that curve for AMZN. Three things to look at:
+
+- **Right of S/S₀ = 1.00** (above autocall): the curve flattens toward
+  notional — these paths autocall fast and return par + first coupon,
+  so there's not much price sensitivity to spot up here.
+- **Left of S/S₀ = 0.70** (below the KI strike): the curve falls
+  linearly with spot — once you're knocked in, the holder takes the
+  worst-of's downside one-for-one (under cash settlement) or capped at
+  the strike (under physical delivery; this build uses physical).
+- **In between (0.70 < S/S₀ < 1.00)**: the bulk of the optionality.
+  The curve bends because it's pricing in the *probability* of
+  hitting one barrier vs the other before maturity.
+
+The red dot marks the value at today's spot — the same number the
+cross-validation table reported for AMZN."""
 )
 code(
     """pde_a = price_fcn_pde_1d(
