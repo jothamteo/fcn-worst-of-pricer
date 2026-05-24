@@ -296,8 +296,10 @@ should be loosely consistent — and we don't expect equality, because:
 1. **Risk-neutral vs real-world drift.** GBM under $\\mathbb{Q}$ uses $r-q$ as
    drift; the realised path used the actual physical drift, which for AMZN /
    META / MU over a 6M window in late 2025 / early 2026 may be very different.
-2. **One realisation vs an expectation.** The realised PV is a single draw;
-   the MC 1-sigma band gives the right scale of "how unlikely is this draw."
+2. **One realisation vs an expectation.** The realised payoff is one
+   sample drawn from a wide distribution. The MC's per-path standard
+   deviation tells us how wide that distribution is, which is the
+   right scale for asking "was this draw typical or extreme?"
 
 What we *do* expect to match exactly is the deterministic discounted-cashflow
 calculus once a path is fixed — verified in `tests/test_mc_pricer.py`."""
