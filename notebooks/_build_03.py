@@ -180,11 +180,14 @@ print(result.summary())
 md(
     """### Interpretation
 
-For an FCN to be issued at par (100% of notional), the model price should be **at or
-above par** — anything below means the structurer is underpaying for the embedded
-short worst-of put / long autocall. Read the % of notional and the probability
-breakdown together: a high P(autocall in period 1) implies the issuer expects
-the note to die fast at par + one coupon, so the model price hugs par from above."""
+For an FCN to be issued at par (100% of notional), the model price should land
+**near or below par**. The gap to par is the structuring margin — the desk's
+day-1 compensation for unhedgeable risks (correlation, gap, model). A model
+price *above* par would mean the desk is undercharging (giving the client a
+bargain), which is economically backwards. Read the % of notional alongside
+the probability breakdown: a high P(autocall in period 1) implies the issuer
+expects the note to die fast at par + one coupon, which pulls the model
+price closer to par from below."""
 )
 
 # ---------------------------------------------------------------------------
