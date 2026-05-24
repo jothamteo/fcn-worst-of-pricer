@@ -340,42 +340,37 @@ fig.tight_layout(); plt.show()
 md(
     r"""## 6. Discussion
 
-**What worked.** The single-asset PDE landed inside the MC 1-σ band on all
-three single-asset reductions, and the convergence study confirmed the
-expected second-order behaviour. That gives us high confidence in the
-3-asset MC price from Phase 3 — the path engine, the payoff arithmetic, the
-observation-grid plumbing, and the discount accounting are all consistent
-with an independent solver.
+**The cross-validation passed.** On all three single-asset reductions the
+PDE price landed inside the MC 1-σ band, and the convergence study
+behaved exactly as Crank–Nicolson predicts (error shrinking ~4× when
+the grid was refined 2×). That gives us solid confidence in the
+3-asset MC price from notebook 03: the path simulator, the payoff
+logic, the observation-grid plumbing, and the discounting are all
+consistent with an independent deterministic solver.
 
-**What this cross-validation does not certify.** Three things:
+**What this cross-validation does *not* cover.** Two things to be
+honest about:
 
-1. **Correlation effects.** The 1-asset reduction has no correlation, so it
-   cannot validate the Cholesky-correlated draws. We hand-checked those in
-   `tests/test_gbm.py` against the analytic covariance, but the FCN-specific
-   propagation of correlation into the worst-of operator is not exercised
-   here. That's the subject of Phase 5 (Greeks — specifically the
-   correlation sensitivity, which is the most non-trivial Greek of this
-   product).
+1. **Correlation effects.** The 1-asset reduction has no correlation
+   to test — dropping to one underlying turns the worst-of operator
+   into an identity. The Cholesky-correlated path generator is
+   exercised by `tests/test_gbm.py` (which checks the simulator's
+   empirical correlation matches the input), but the way correlation
+   feeds into the *worst-of FCN payoff* specifically isn't covered
+   here. That's what notebook 05's correlation sensitivity (cega)
+   measurement is for.
 
-2. **Variance reduction.** We use antithetic variates throughout. The
-   worst-of European put control-variate planned in METHODOLOGY.md §2.2 is
-   not yet wired in — leaving that as a deliberate Phase 6 enhancement once
-   the basic Greeks are in. (Antithetic alone already cuts the MC SE by
-   roughly $\sqrt{2}$ on this product; the control variate would help most
-   on knocked-in paths.)
+2. **Variance reduction.** This notebook uses antithetic variates
+   only. The worst-of European put control variate (notebook 06)
+   isn't wired in here — it would tighten the MC SE by another
+   2-3× on the knocked-in tail, but we wanted nb04 to show the
+   clean MC vs PDE comparison without extra layers between them.
 
-3. **Continuous KI.** The PDE supports European KI only (the spec's
-   default). A continuous-KI variant is a straightforward extension of the
-   payoff logic in MC; in the PDE it would require an absorbing-boundary
-   condition along the strike level for $t \in (t_{j-1}, t_j)$, which is
-   substantially more code. We've chosen not to do it: the default
-   structure is European KI.
-
-**On the PDE's runtime.** Roughly 200 ms per priced product on a daily
-calendar grid with 800 space intervals × 400 time steps. That's not the
-direction we'd push for a production pricer (MC scales to higher
-dimensions; PDE doesn't), but it's plenty fast for the calibration / sanity
-work this notebook is built for."""
+**PDE runtime.** ~200 ms per price on a daily grid with 800 × 400
+steps. Fast enough for sanity-checking and convergence studies, but
+not a production engine — the PDE can't scale to the 3-asset case
+without a 3D solver, which is exactly why MC is the headline pricer
+and the PDE is purely a validation tool here."""
 )
 
 # ---------------------------------------------------------------------------
