@@ -17,7 +17,7 @@ def _format_pnl(x: float) -> str:
 
 
 def render() -> None:
-    st.subheader("P&L vs trade inception")
+    st.subheader("P&L vs trade inception (dealer view)")
 
     initial = st.session_state["initial"]
     current = st.session_state["current"]
@@ -28,7 +28,9 @@ def render() -> None:
 
     initial_price = float(init_state["price"])
     current_price = float(cur_pricing["price"])
-    pnl = current_price - initial_price
+    # Dealer is SHORT the FCN — dealer P&L is the mirror of the holder's PV move.
+    # If MTM falls (structure cheaper to buy back), dealer gains.
+    pnl = -(current_price - initial_price)
 
     days_since_issue = (current.as_of - initial.as_of).days
 
@@ -37,7 +39,12 @@ def render() -> None:
         "MTM price",
         f"${current_price:,.0f}",
         f"{100 * current_price / notional:.2f}% of notional",
-        help="Mark-to-market value of the FCN at the current snapshot, in USD.",
+        help=(
+            "Mark-to-market value of the FCN at the current snapshot, in USD. "
+            "This is the price of the structure itself (same number regardless "
+            "of which side of the trade you're on). The dealer holds a short "
+            "position in this — so a lower MTM is a gain on the dealer's book."
+        ),
     )
     col2.metric(
         "Issue price",
@@ -45,14 +52,20 @@ def render() -> None:
         f"{100 * initial_price / notional:.2f}% of notional",
         help=(
             "Fair value at trade inception under the issue-date market state. "
-            "This is the linearisation point for the Greek-based attribution below."
+            "The client paid par for this; the gap between par and Issue price "
+            "is the desk's day-1 structuring margin."
         ),
     )
     col3.metric(
-        "P&L (USD)",
+        "P&L (USD, dealer)",
         _format_pnl(pnl),
         f"{100 * pnl / max(abs(initial_price), 1.0):+.2f}% vs issue",
-        help="MTM − issue. Decomposed by Greek bucket in the waterfall below.",
+        help=(
+            "Dealer P&L since inception = −(MTM − Issue). The dealer is short "
+            "the FCN, so a lower MTM means the structure is cheaper to buy "
+            "back and the dealer's book has gained. Decomposed by Greek "
+            "bucket in the waterfall below."
+        ),
     )
     col4.metric(
         "Days since issue",
@@ -61,7 +74,8 @@ def render() -> None:
     )
 
     # -----------------------------------------------------------------------
-    # Attribution
+    # Attribution — engine returns holder-side numbers; we flip signs for the
+    # dealer view at the display layer (no engine changes).
     # -----------------------------------------------------------------------
     attr = attribute(
         initial=initial,
@@ -73,9 +87,9 @@ def render() -> None:
         initial_cega_pair=np.asarray(init_state["cega_pair"]),
     )
 
-    st.markdown("### Attribution waterfall")
+    st.markdown("### Attribution waterfall (dealer view)")
     st.caption(
-        "Greek-by-Greek breakdown of MTM P&L. Bars sum to total; "
+        "Greek-by-Greek breakdown of dealer P&L. Bars sum to total; "
         "Residual captures Γ, cross-terms, and MC noise."
     )
 
@@ -85,7 +99,15 @@ def render() -> None:
 
 def _render_waterfall(attr: PnLAttribution) -> None:
     labels = ["Spot (Δ·ΔS)", "Vol (Vega·Δσ)", "Corr (Cega·Δρ)", "Theta (proxy)", "Residual", "Total"]
-    values = [attr.spot_pnl, attr.vol_pnl, attr.corr_pnl, attr.theta_pnl, attr.residual_pnl, attr.total_pnl]
+    # Engine numbers are holder-side; dealer is the mirror, so negate every bar.
+    values = [
+        -attr.spot_pnl,
+        -attr.vol_pnl,
+        -attr.corr_pnl,
+        -attr.theta_pnl,
+        -attr.residual_pnl,
+        -attr.total_pnl,
+    ]
     measure = ["relative", "relative", "relative", "relative", "relative", "total"]
 
     fig = go.Figure(go.Waterfall(
@@ -111,20 +133,19 @@ def _render_waterfall(attr: PnLAttribution) -> None:
 
     with st.expander("How to read this", expanded=False):
         st.markdown(
-            "- **Spot** is `Σᵢ Δᵢ(initial) · (Sᵢ_current − Sᵢ_initial)`.\n"
-            "- **Vol** is `Σᵢ Vegaᵢ(initial) · (σᵢ_current − σᵢ_initial)`.\n"
-            "- **Corr** is `Σ_{i<j} cega_ij(initial) · Δρ_ij`. cega is per +0.01 in ρ.\n"
-            "- **Theta (proxy)** is `−r · V_initial · Δt` — a bond-component "
-            "approximation; full-reval theta would also reflect changes in the "
-            "remaining observation tail. Treated as a sanity rail, not a P&L claim.\n"
-            "- **Residual** = total P&L minus the first-order sum. For large "
-            "moves it picks up Γ and cross-terms; for small moves it should be "
-            "close to zero modulo MC noise."
+            "All numbers are from the **dealer's** perspective (the dealer is "
+            "short the FCN). Each Greek bar = − (Greek_holder × move) — the "
+            "minus sign is what makes the dealer view the mirror of the holder.\n\n"
+            "- **Spot** = `−Σᵢ Δᵢ(initial) · (Sᵢ_current − Sᵢ_initial)`. Dealer is short the basket; spot up → dealer loses.\n"
+            "- **Vol** = `−Σᵢ Vegaᵢ(initial) · (σᵢ_current − σᵢ_initial)`. Dealer is long vol; vol up → dealer gains.\n"
+            "- **Corr** = `−Σ_{i<j} cega_ij(initial) · Δρ_ij`. cega is per +0.01 in ρ. Dealer is short correlation; ρ up → dealer loses.\n"
+            "- **Theta (proxy)** = `+r · V_initial · Δt`. Bond-leg approximation; full-reval theta would also reflect changes in the remaining observation tail. Treated as a sanity rail, not a P&L claim.\n"
+            "- **Residual** = total dealer P&L minus the first-order sum. For large moves it picks up Γ and cross-terms; for small moves it should be close to zero modulo MC noise."
         )
 
 
 def _render_attribution_table(attr: PnLAttribution, initial, current) -> None:
-    st.markdown("### Per-name spot / vol contributions")
+    st.markdown("### Per-name spot / vol contributions (dealer view)")
     rows = []
     for i, t in enumerate(current.tickers):
         rows.append({
@@ -132,9 +153,9 @@ def _render_attribution_table(attr: PnLAttribution, initial, current) -> None:
             "Initial spot": f"${initial.spots[i]:,.2f}",
             "Current spot": f"${current.spots[i]:,.2f}",
             "ΔS (%)": f"{100 * (current.spots[i] / initial.spots[i] - 1):+.2f}%",
-            "Spot P&L": _format_pnl(float(attr.spot_pnl_by_name[i])),
+            "Spot P&L": _format_pnl(-float(attr.spot_pnl_by_name[i])),
             "Initial vol": f"{100 * initial.vols[i]:.1f}%",
             "Current vol": f"{100 * current.vols[i]:.1f}%",
-            "Vol P&L": _format_pnl(float(attr.vol_pnl_by_name[i])),
+            "Vol P&L": _format_pnl(-float(attr.vol_pnl_by_name[i])),
         })
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)

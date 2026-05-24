@@ -10,24 +10,27 @@ from dashboard.engine import get_full_state
 
 
 def render() -> None:
-    st.subheader("Greeks")
+    st.subheader("Greeks (dealer view)")
     st.caption(
         "Per-underlying Δ (raw and per-1% spot move), Vega (per 1 vol-pt), "
-        "and pairwise correlation sensitivity. Sourced from the same engine "
-        "that drives the P&L attribution."
+        "and pairwise correlation sensitivity, all from the dealer's perspective "
+        "(dealer is short the FCN; signs are the mirror of the investor's). "
+        "Sourced from the same engine that drives the P&L attribution."
     )
 
     current = st.session_state["current"]
     tickers = current.tickers
     state = get_full_state(current)
-    delta = np.asarray(state["delta"])
-    vega = np.asarray(state["vega"])
-    cega_pair = np.asarray(state["cega_pair"])
+    # Engine returns holder-side Greeks; dealer is the mirror, so negate at the
+    # display layer (no engine changes, consistent with the P&L panel).
+    delta = -np.asarray(state["delta"])
+    vega = -np.asarray(state["vega"])
+    cega_pair = -np.asarray(state["cega_pair"])
     source = state.get("source", "?")
     spots = np.asarray(current.spots, dtype=float)
 
     # -----------------------------------------------------------------------
-    # Headline aggregates
+    # Headline aggregates (dealer side)
     # -----------------------------------------------------------------------
     total_delta_notional = float((delta * spots).sum())
     total_vega = float(vega.sum())
@@ -37,17 +40,19 @@ def render() -> None:
         "Net Δ notional",
         f"${total_delta_notional:,.0f}",
         help=(
-            "Σᵢ Δᵢ · Sᵢ — the basket-equivalent USD delta exposure. Long for a "
-            "standard worst-of FCN holder; the issuer needs to hold this much "
-            "long stock to flatten the spot book."
+            "Σᵢ Δᵢ · Sᵢ from the dealer's side. The dealer is **short** the "
+            "basket on a worst-of FCN — this number is negative, and its "
+            "absolute value is how much long stock the dealer needs to hold "
+            "to flatten the spot leg of the book."
         ),
     )
     col2.metric(
         "Net Vega (per +1.0 vol)",
         f"${total_vega:,.0f}",
         help=(
-            "Σᵢ Vegaᵢ for a parallel shift of every realised vol by +1.0. "
-            "Divide by 100 to get vega per +1 vol-pt."
+            "Σᵢ Vegaᵢ for a parallel shift of every realised vol by +1.0, dealer "
+            "side. Dealer is **long** vol on a worst-of FCN → positive number → "
+            "dealer gains when vol rises. Divide by 100 to get vega per +1 vol-pt."
         ),
     )
     col3.metric(
@@ -79,9 +84,10 @@ def render() -> None:
     if len(tickers) >= 2:
         st.markdown("### Pairwise correlation sensitivity (cega)")
         st.caption(
-            "FCN P&L per +0.01 in the pairwise correlation between each leg. "
-            "Issuer is *short* correlation on a worst-of FCN — a positive "
-            "number means the holder gains when ρ rises."
+            "Dealer P&L per +0.01 in the pairwise correlation between each leg. "
+            "Dealer is **short** correlation on a worst-of FCN — a negative "
+            "number means the dealer loses when ρ rises (equivalently, gains "
+            "when ρ falls)."
         )
         crows = []
         for i in range(len(tickers)):
