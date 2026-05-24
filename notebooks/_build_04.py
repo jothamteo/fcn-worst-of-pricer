@@ -159,7 +159,7 @@ For each ticker we build a 1-asset `MarketData` (same vol/div/rate as the
 basket loader returned), price the FCN with **both** engines, and report
 the headline `|PDE − MC| / SE` figure.
 
-- MC: 80,000 antithetic primal paths (160k effective), seed 20260511.
+- MC: 50,000 antithetic primal paths (100k effective), seed 20260511 — same budget as nb03's headline run for direct comparability.
 - PDE: 1600 space intervals × 160 time steps per period × 5 inter-event
   segments ≈ 800 total CN sub-steps."""
 )
@@ -183,7 +183,7 @@ for i, name in enumerate(TICKERS):
     div_i = float(market.divs[i])
 
     m_i = _single_asset_market(spot_i, vol_i, div_i, market.rate)
-    mc_i = price_fcn(market=m_i, product=product, n_paths=80_000, antithetic=True, seed=20260511)
+    mc_i = price_fcn(market=m_i, product=product, n_paths=50_000, antithetic=True, seed=20260511)
 
     t0 = time.perf_counter()
     pde_i = price_fcn_pde_1d(
