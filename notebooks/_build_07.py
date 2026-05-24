@@ -29,20 +29,25 @@ def code(text: str) -> None:
 md(
     r"""# 07 — Summary
 
-The portfolio-piece headline notebook. Single-screen, no exploration —
-just the things a structured-products desk would ask to see for a
-hypothetical worst-of FCN on AMZN, META and MU:
+This is the headline notebook — a single-screen view of what the
+pricer produces for a hypothetical worst-of FCN on AMZN, META and MU.
+No exploration; no build-up. Just the things a structured-products
+desk would ask to see on the trade ticket:
 
-1. **Final price** with antithetic + worst-of put CV stacked, plus the
-   single-asset PDE cross-validation row.
-2. **Greeks table** (Δ, Γ, vega, ρ_pair) — bump-and-revalue with CRN.
-3. **Honest findings** — two plots that show where this implementation
-   works well and where it doesn't.
-4. **Limitations** — flat-vol, constant-correlation, European KI, fair
-   summary of what's *not* in the model.
+1. **Final price** — best-effort MC price with antithetic + worst-of
+   put control variate stacked, alongside the single-asset PDE
+   cross-validation that says the engine is wired up correctly.
+2. **Greeks table** — Δ, Γ, vega, and pairwise correlation
+   sensitivity, computed via bump-and-revalue under common random
+   numbers.
+3. **Honest findings** — two plots showing where the implementation
+   works well (the bulk of the spot range) and where it gets noisy
+   (near the autocall and KI barriers).
+4. **Limitations** — what the model deliberately doesn't capture.
+   Flat vol, constant correlation, European KI, etc.
 
-This notebook is intentionally short and reads top-to-bottom. The
-preceding notebooks (`01`–`06`) are the working ones."""
+This notebook is meant to be read top-to-bottom in one sitting.
+The detailed work lives in notebooks 01–06."""
 )
 
 code(
@@ -115,10 +120,16 @@ print(market.summary())
 md(
     """## 1. Price
 
-Antithetic variates and the worst-of-put control variate are stacked. The
-main MC run uses 80,000 antithetic paths (= 160k effective) with seed
-pinned. $\\mathbb{E}[Y]$ for the CV comes from an independent 400k-path
-pre-pass."""
+The headline number. We stack both variance-reduction techniques —
+antithetic variates *and* the worst-of put control variate — on top
+of each other to get the tightest possible standard error for a given
+path budget.
+
+Main MC run: 80,000 antithetic primal paths (= 160k effective), seed
+pinned for reproducibility. The control variate needs $\\mathbb{E}[Y]$
+(the worst-of put's true expected value) — we pre-pass that with
+400,000 paths at a different seed (independent of the main run) so the
+CV correction is unbiased."""
 )
 code(
     """final_mc = price_fcn(
@@ -132,10 +143,14 @@ print(final_mc.summary())
 md(
     """### Single-asset PDE cross-validation
 
-The 1D Crank–Nicolson PDE prices the same product applied to each name
-individually (worst-of operator dropped). All three lie inside a few MC
-standard errors of the MC price — independent confirmation that the
-path-engine and payoff arithmetic are wired up correctly."""
+For each of the three names, we price a 1-asset version of the same
+FCN (worst-of operator dropped because there's only one underlying)
+using the deterministic Crank–Nicolson PDE from notebook 04, and
+compare against the MC pricer running the same single-asset
+reduction. All three names land **inside a few MC standard errors**
+of the PDE — that's independent confirmation that the path simulator,
+the payoff arithmetic, the observation-grid plumbing, and the
+discounting are all consistent with a completely different solver."""
 )
 code(
     """rows = []
@@ -170,8 +185,14 @@ pd.DataFrame(rows).round(4)
 md(
     """## 2. Greeks
 
-Bump-and-revalue with CRN at 80k antithetic paths, 1% spot bump, 1 vol-pt
-vega bump, 0.05 correlation bump (reported per 0.01)."""
+The standard desk risk table — Δ (spot), Γ (curvature), vega (vol),
+and pairwise cega (correlation), all per-name.
+
+Bump-and-revalue with common random numbers: 80k antithetic paths,
+±1% spot bump, ±1 vol-point bump, ±0.05 correlation bump (reported
+per +0.01 in ρ, the desk convention). See notebook 05 for the full
+discussion of how these Greeks are estimated and why some are noisier
+than others."""
 )
 code(
     """greeks = mc_greeks_bump(
@@ -209,18 +230,29 @@ pd.DataFrame(rho_rows).round(4)
 md(
     r"""## 3. Honest findings
 
-Two plots, each worth more than a sentence.
+Two plots that show what works and what doesn't. Neither tries to
+sell you on the model.
 
 ### 3.1 Δ near the barriers — MC noise vs the PDE smooth reference
 
-Bump-and-revalue MC Greeks are noisy near the discrete-observation
-barriers. The mechanism is well-known (Glasserman 2003, §7.2):
-near `S/S₀ = 1.00` and `S/S₀ = 0.70`, the bump occasionally flips a
-path's outcome between two qualitatively different regimes (autocall
-vs continue; KI vs above-strike), creating a discontinuous payoff
-difference that the variance estimator cannot smooth over. We see
-this in the widening of the MC ribbon precisely at those two
-levels."""
+Bump-and-revalue MC Greeks have a known weakness: they get noisy near
+discrete-observation barriers. The mechanism is straightforward — at
+`S/S₀ = 1.00` (autocall) or `S/S₀ = 0.70` (KI), a small spot bump can
+flip a path's outcome between two completely different regimes:
+"autocalls at obs 1, redeems early at par + one coupon" vs "doesn't
+autocall, continues to maturity"; or "knocked in, takes the worst-of
+downside" vs "above strike, gets full par". The per-path payoff
+difference jumps from a small sensitivity number to a regime-switch
+discontinuity, and the variance estimator can't smooth over it.
+
+The plot below sweeps AMZN's spot from below the KI strike up through
+the autocall barrier, computing Δ both ways. The PDE curve is smooth.
+The MC ribbon (its ±1σ noise band) widens visibly at exactly
+`S/S₀ = 0.70` and `S/S₀ = 1.00`. That's not a bug — it's a structural
+feature of bump-and-revalue MC on barrier products, documented in
+Glasserman (2003) §7.2. Notebook 08 fixes it with a smoothed-payoff
+variant; here we leave it visible because honesty about the failure
+mode is part of the deliverable."""
 )
 code(
     """amzn_market = MarketData(
@@ -262,10 +294,23 @@ fig.tight_layout(); plt.show()
 md(
     r"""### 3.2 Variance reduction stack
 
-Antithetic alone cuts MC SE by ≈$\sqrt{2}$. Adding the worst-of put
-control variate gets us another ≈$1.5$–$2\times$ on top, depending on
-how well the put's payoff captures the FCN's loss tail (i.e., how
-negative $\rho_{XY}$ is)."""
+How much do antithetic variates and the worst-of put control variate
+actually buy us in MC efficiency? The chart below plots MC standard
+error against the total path budget for three configurations:
+
+- **No variance reduction** — vanilla MC at $N$ paths.
+- **Antithetic only** — pair each draw $\eta$ with $-\eta$; cuts the
+  linear-in-noise component of the payoff variance for free
+  (~$\sqrt{2}$ tighter SE).
+- **Antithetic + worst-of put CV** — adds the control variate layer
+  on top; further $\sqrt{2}$–$\sqrt{5}$ tighter SE depending on
+  $\rho_{XY}$.
+
+All three lines should converge as $1/\sqrt{N}$ at high path counts;
+the variance-reduction techniques effectively shift the line *down*
+(same slope, lower intercept). The further below the no-VR line a
+configuration sits, the less budget you need to reach a given target
+SE — which is the real-world payoff of variance reduction."""
 )
 code(
     """ns = [5_000, 10_000, 20_000, 40_000, 80_000]
@@ -303,39 +348,53 @@ fig.tight_layout(); plt.show()
 md(
     r"""## 4. Limitations
 
-The model is the textbook one. The things it **doesn't** capture are
-deliberately out of scope:
+This is the textbook model. The things below are deliberately
+**not** in it — each is a place a real desk would layer extra
+modelling on top:
 
-1. **Flat Black-Scholes vol per name.** No smile, no term structure. A
-   real desk would re-extract vols at each observation date from the
-   listed option chain (Phase 3 already does the implied-vol bootstrap
-   for the at-the-money point — calibrating a full surface and feeding
-   it into a local-vol or stochastic-vol simulator is the natural next
-   project).
-2. **Constant correlation matrix.** Correlations drift, particularly in
-   stress — a Brownian-correlation or DCC model would change the
-   ρ_pair Greeks. The Greeks table reports the sensitivity to this
-   assumption; in practice that's the exposure metric the desk hedges.
-3. **European KI only on the PDE side.** The MC pricer supports
-   continuous-KI monitoring (`continuous_ki=True`); the 1D PDE engine
-   does not — implementing it would require an absorbing-boundary
-   condition along the strike between observation dates. The
-   default structure is European KI; the gap is documented in
-   METHODOLOGY §4.
-4. **Bump-Γ noise.** As the Δ-vs-spot plot shows, MC Γ near the
-   barriers is structurally noisy. Real desks deploy
-   smoothed-payoff variants (e.g. replace the autocall indicator with a
-   tight sigmoid centred at the barrier) for clean Γ — outside the
-   scope of this repo's "honest-MC" goal but on the to-do list for any
-   production use.
-5. **Hard-coded coupon barrier mode.** `coupon_barrier=None` (flat
-   coupon every period until autocall) is the JT default; the
-   conditional-coupon variant is tested but not the headline.
+1. **Flat per-name vol.** Every name carries one constant vol number
+   over the life of the trade (5Y realised in this build). No
+   smile (downside puts trade at a different implied vol than
+   ATM calls — relevant because the KI is a 70%-strike put), no
+   term structure (vols vary by maturity), no stochastic vol
+   (Heston-style dynamics). A production system would calibrate a
+   full vol surface per name and feed it into a local-vol or
+   stochastic-vol simulator.
+2. **Constant correlation matrix.** Realised correlations *drift*,
+   and they rise in stress (the "correlation 1 in a crisis"
+   phenomenon). A Brownian-correlation or DCC-style dynamic model
+   would change the cega numbers materially. The Greeks table
+   reports the *sensitivity* to correlation, which is what the desk
+   actually hedges against — but the model can't tell you how that
+   sensitivity will evolve through a sell-off.
+3. **PDE supports only European KI.** The MC pricer supports
+   continuous-KI monitoring (`continuous_ki=True` in the library);
+   the 1D PDE doesn't, because that would require an absorbing
+   boundary along the strike between observation dates and a
+   non-trivial rewrite of the time-stepping. The default product
+   spec here uses European KI (checked only at maturity), so the
+   gap is fine for this build but flagged for completeness.
+4. **Γ noise near the barriers.** As §3.1 above shows, MC Γ is
+   structurally noisy near the autocall and KI barriers. Real
+   desks use smoothed-payoff variants — replace each hard
+   indicator with a steep sigmoid centred at the barrier — which
+   gives clean Γ at the cost of a small price bias. Notebook 08
+   demonstrates this; the headline numbers here use the hard
+   payoff because the "honest MC" story is what nb07 is trying to
+   tell.
+5. **Flat coupons only on the headline.** This build uses
+   `coupon_barrier=None`: a fixed coupon every period until
+   autocall. The library *also* supports conditional coupons
+   (paid only when the worst-of is above a barrier on the
+   observation date) — that's tested but not used in the headline
+   numbers here.
 
-None of these are reasons to distrust the price *for this product spec
-under these assumptions* — the cross-validation against the PDE is the
-direct evidence the engines are wired up correctly. They are reasons
-the desk would, in a live setting, layer additional model risk on top."""
+**None of these are reasons to distrust the price for this product
+under this snapshot.** The cross-validation against the PDE in §1 is
+direct evidence that the engines are computing the right thing for
+the inputs given. The list above is what the desk would *add* in a
+live setting — model risk reserves, smile dynamics, correlation
+stress overlays — to cover the gap between the model and reality."""
 )
 
 # ---------------------------------------------------------------------------
