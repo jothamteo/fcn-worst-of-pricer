@@ -282,16 +282,59 @@ fig.tight_layout(); plt.show()
 """
 )
 md(
-    """**Reading the scatter:** the autocalled and par-at-maturity paths
-all land at $Y = 0$ on the right side of the chart — the put is
-worthless on those paths, so there's no information for the CV to
-exploit there. All the action is in the **left wedge** where the
-worst-of finished below the 70% strike (knocked-in paths). That's
-where $X$ and $Y$ move in opposite directions, that's where the
-correlation comes from, and that's where the CV pulls noise out of
-the estimator. Knocked-in paths are also where the FCN's
-*path-level variance* concentrates — so the CV is removing noise
-from the exact place it lives."""
+    r"""**What the scatter shows.** Each dot is **one simulated path**
+through the AMZN/META/MU world. Its position on the chart says two
+things about that path:
+
+- **X-coordinate** = the FCN's discounted payoff on that path (dollars
+  the investor received from the structure).
+- **Y-coordinate** = what a *worst-of European put* (struck at 70% of
+  initial spot) would have paid on the same path. Y = 0 means the put
+  was worthless; Y > 0 means the put was in-the-money at maturity (the
+  worst-of finished below 70%).
+
+Three regions visible in the plot, each corresponding to a different
+*kind* of path:
+
+**Region 1 — autocalled paths (right side, Y = 0).**
+The worst-of rose above 100% at one of the autocall observation dates,
+so the trade redeemed early at par + accrued coupons. The put at
+maturity? Pays zero — by the time maturity arrives the trade has
+already terminated, and even if it hadn't, the worst-of was high
+enough to autocall in the first place. So these paths land at:
+X ≈ par + a few coupons (somewhere around \$50K–\$53K depending on
+which obs autocalled), Y = 0.
+
+**Region 2 — par-at-maturity paths (right side, Y = 0).**
+The worst-of stayed alive through all 6 observations without
+autocalling, and finished above the 70% strike at maturity. The trade
+pays par + all 6 coupons. The put pays zero because the worst-of
+finished above 70%. So these also stack at Y = 0, slightly to the
+right of the autocalled cluster (because they collected more coupons).
+
+**Region 3 — knocked-in paths (the left wedge, Y > 0).**
+The worst-of finished *below* 70% at maturity. The FCN pays less
+than par (physical-delivery downside). The put pays the gap below
+70%, scaled by notional. The lower the worst-of at maturity, the
+*more* the put pays AND the *less* the FCN pays — so as Y goes up,
+X goes down. That's the negative correlation the CV needs.
+
+**Why the right cluster doesn't help the CV.** Both
+"autocalled" and "par-at-maturity" paths sit at Y = 0 — there's no
+variation in Y, so nothing for the CV to exploit. The correlation
+between X and Y comes *entirely from the knocked-in wedge* on the
+left. Concretely: the CV's optimal coefficient β = Cov(X, Y) /
+Var(Y), and both Cov and Var of Y are determined by the wedge alone.
+
+**Why the left wedge is exactly the right place to remove noise
+from.** The FCN's path-level variance — i.e., the spread of possible
+outcomes — *is concentrated in the knocked-in region*. The right
+cluster has minimal variance (par ± a couple coupons); the left
+wedge has the full range of downside outcomes. So when the CV cancels
+sampling noise on the wedge paths, it's cancelling noise on the part
+of the distribution that actually drives the MC standard error in the
+first place. That's why this particular CV is so effective for this
+particular product."""
 )
 
 # ---------------------------------------------------------------------------
