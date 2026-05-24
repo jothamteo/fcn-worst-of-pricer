@@ -25,47 +25,71 @@ def code(text: str) -> None:
 md(
     r"""# 08 — Smoothed-payoff Greeks (the production-desk fix)
 
-Notebook 05 ended on a deliberately unresolved problem: bump-and-revalue MC
-Greeks blow up near the autocall and knock-in barriers, while the PDE Δ
-stays smooth. The standard production-desk fix is to **replace each hard
-indicator in the payoff with a sigmoid** of controllable steepness. The
-smoothed payoff is
+Notebook 05 left us with an honest finding: bump-and-revalue MC Greeks
+get noisy near the autocall and knock-in barriers, while the PDE Δ
+stays smooth. This notebook fixes it.
+
+**The idea.** The FCN's payoff contains *indicator functions* — hard
+yes/no decisions like "is the worst-of ≥ 100% at this observation
+date? → autocall triggers" or "is the worst-of < 70% at maturity? →
+KI triggers". Indicators are discontinuous, and discontinuities are
+exactly what make bump-and-revalue noisy: a small spot bump can flip
+a path's outcome between two completely different cashflow regimes,
+making per-path differences huge and unstable.
+
+The fix is to replace each hard indicator with a **smooth sigmoid**
+of controllable steepness:
 
 $$
 \mathbb{1}\{W \ge B\} \;\longrightarrow\; \sigma\!\left(\frac{k\,(W - B)}{B}\right),
-\qquad \sigma(x) = \frac{1}{1 + e^{-x}},
+\qquad \sigma(x) = \frac{1}{1 + e^{-x}}.
 $$
 
-and the autocall becomes a *soft* event with survival probability
-propagating multiplicatively across observation dates. Cashflows are then
-probability-weighted instead of indicator-gated. As $k \to \infty$ the
-smoothed payoff converges pointwise to the hard payoff; at finite $k$ the
-price picks up a small $O(1/k)$ bias but the gradient w.r.t. spots / vols /
-correlation becomes continuous — which is exactly what kills the
-bump-and-revalue noise at the barriers.
+The sigmoid takes a value near 0 well below the barrier and near 1
+well above it, transitioning smoothly through 0.5 *at* the barrier.
+The parameter $k$ controls how steep the transition is. Large $k$
+makes it look almost like a step function (close to the hard
+indicator); small $k$ makes it a gentle curve.
+
+Under the smoothed payoff, the autocall stops being a discrete event.
+At each observation date, every path gets a **probability of
+autocalling** (the sigmoid value), and cashflows are
+probability-weighted instead of indicator-gated. Mathematically the
+payoff becomes a smooth function of the inputs — which is exactly
+what bump-and-revalue needs to produce clean Greeks.
+
+The trade-off: as $k \to \infty$ the smoothed payoff converges
+pointwise to the hard payoff (zero bias on the price). At finite
+$k$, the price picks up a small bias of order $1/k$, but the
+gradients with respect to spots, vols, and correlations become
+continuous. The desk-standard move is to **report the hard price on
+the trade ticket and use the smoothed payoff only for the Greeks
+shipped to risk** — treating them as two independent estimators with
+different bias/variance trade-offs.
 
 **Reading order**
-1. Setup — same AMZN/META/MU FCN as in notebooks 03 / 05.
-2. Δ-vs-spot scan: hard MC (ribbon explodes at the barriers) vs smoothed
-   MC (clean) vs PDE (reference).
-3. Γ-vs-spot scan: the more dramatic demonstration — hard MC Γ is dominated
-   by noise; smoothed MC Γ tracks the PDE curve.
-4. Bias-variance trade-off: sweep $k$ and watch the price bias vanish vs
-   the residual Γ noise grow.
+1. Setup — same AMZN/META/MU FCN as in notebooks 03 and 05.
+2. Δ-vs-spot scan: compare hard MC (noisy ribbon at the barriers),
+   smoothed MC (clean), and PDE (reference).
+3. Γ-vs-spot scan: the more dramatic demonstration — hard MC Γ
+   swings wildly at the barriers; smoothed MC Γ tracks the PDE curve.
+4. Bias-variance trade-off in $k$: sweep five values of $k$ and
+   watch the price bias shrink as $k$ grows while Γ-variance grows
+   in the other direction.
 5. Recommended desk default for $k$ on this product.
 
-**Note on settlement method.** This product uses **physical delivery**, which
-makes the maturity payoff *continuous at the strike* (break-even sits exactly
-at $W(T) = K$, no cliff). That alone removes the KI-region Γ blow-up under
-hard MC — there is no payoff discontinuity for the bump to straddle. The
-**autocall barrier remains discontinuous** under both settlement methods,
-however (par + coupon vs alive continuation), so smoothing is still useful
-there. Under **cash settlement** the KI discontinuity at the strike would
-return and the Γ blow-up would be even more pronounced — smoothing would be
-useful at *both* barriers. The plots below are under physical delivery; the
-remaining hard-MC noise is dominated by the autocall barrier and the
-distance-to-barrier Γ-statistics of the bump estimator.
-"""
+**Note on settlement method.** This product uses **physical delivery**,
+which makes the maturity payoff *continuous at the strike* (break-even
+sits exactly at $W(T) = K$, no cliff). That alone removes the
+KI-region Γ blow-up — there's no payoff discontinuity for the bump to
+straddle at maturity. The **autocall barrier remains discontinuous**
+though (par + coupon vs alive continuation), so smoothing is still
+useful there. Under cash settlement the KI discontinuity at the
+strike would return and the Γ blow-up would be even more pronounced
+— smoothing would be useful at *both* barriers. The plots below are
+under physical delivery; the remaining hard-MC noise comes mostly
+from the autocall barrier and from Γ's intrinsic small-numerator /
+small-denominator amplification."""
 )
 
 code(
@@ -95,11 +119,12 @@ np.set_printoptions(suppress=True, precision=6)
 
 # ---------------------------------------------------------------------------
 md(
-    """## 1. Setup — reuse the Phase 3 market snapshot
+    """## 1. Setup
 
-Same as-of-date AMZN/META/MU basket and the same 6-observation FCN. We
-reduce to AMZN-only for the spot scan because the comparison against the
-1D PDE is what makes the Γ plot tell a clean story."""
+Same AMZN/META/MU snapshot and 6-observation FCN as notebooks 03 and
+05. We reduce to AMZN-only for the spot scans because the 1D PDE only
+runs on a single asset — and the PDE Greeks are what we benchmark the
+smoothed MC against."""
 )
 
 code(
@@ -151,21 +176,28 @@ print(f"AMZN spot = {amzn_market.spots[0]:,.2f}, vol = {amzn_market.vols[0]:.4f}
 md(
     r"""## 2. Δ-vs-spot — hard MC vs smoothed MC vs PDE
 
-We sweep AMZN spot from 0.5 × S₀ (well below the 0.70 KI level) up to
-1.3 × S₀ (well above the 1.00 autocall barrier), at every grid point
-running:
+Sweep AMZN's spot from 0.5 × S₀ (well below the 0.70 KI level) up to
+1.3 × S₀ (well above the 1.00 autocall barrier). At every grid point
+compute Δ three ways:
 
-* **Hard MC.** 20k antithetic paths, CRN, 1% bump.
-* **Smoothed MC.** Same paths, same bump, but the payoff is now the
-  sigmoid-smoothed version with $k_{ac} = k_{ki} = 100$.
-* **PDE.** Off-grid central differences on a 1200 × 120 Crank–Nicolson
-  grid, re-gridded for each spot.
+* **Hard MC.** Standard bump-and-revalue with the indicator-gated
+  payoff. 20k antithetic paths, same random numbers across the bumped
+  and unbumped runs, 1% spot bump.
+* **Smoothed MC.** Same paths, same bump, but every indicator in the
+  payoff is replaced with a sigmoid at $k_{ac} = k_{ki} = 100$.
+* **PDE.** Deterministic reference from the 1D Crank–Nicolson grid,
+  re-solved at each spot.
 
-The hard-MC ribbon is the same shape that appeared in notebook 05 —
-visibly wide at the autocall barrier and again at the KI barrier. The
-smoothed-MC ribbon collapses onto the PDE curve everywhere except at the
-extreme tails of the scan (where vol is small relative to the
-distance-to-barrier and the smoothing bias is most visible)."""
+What you're looking for:
+
+- The **hard-MC ribbon** widens at the two barrier levels (same shape
+  as the notebook 05 plot — the "honest finding" we left there).
+- The **smoothed-MC ribbon** collapses onto the PDE curve almost
+  everywhere. The only places it deviates are the extreme tails of
+  the scan, where vol is small relative to the distance-to-barrier
+  and the $1/k$ smoothing bias becomes visible.
+- The **PDE Δ** is the smooth deterministic reference, unchanged
+  from notebook 05."""
 )
 
 code(
@@ -215,16 +247,23 @@ fig.tight_layout(); plt.show()
 md(
     r"""## 3. Γ-vs-spot — the more dramatic story
 
-Γ is the bump-and-revalue estimator's worst case: the central-difference
-formula divides a small finite difference by $\epsilon^2$, so any
-indicator-flip noise in the numerator is amplified into wild Γ values
-near the barriers. This is the plot that motivates building the
-smoothed-payoff machinery in the first place.
+Γ is the bump-and-revalue estimator's hardest case. The central-
+difference formula divides a small finite difference (two big prices
+nearly cancelling) by $\epsilon^2$ — a tiny number squared. Any
+indicator-flip noise in the numerator gets amplified by $1/\epsilon^2$
+in the ratio, producing wildly noisy Γ near the barriers. This is the
+plot that motivates the smoothed-payoff machinery in the first place
+— Δ noise is irritating; Γ noise is unworkable.
 
-The smoothed-MC Γ tracks the PDE Γ curve almost exactly, with a tight
-ribbon. The hard-MC Γ swings between large positive and large negative
-spikes at the autocall and KI barriers — not informative, not
-publishable on a desk daily risk report."""
+What you'll see:
+
+- **Hard MC Γ** (blue) swings between huge positive and huge negative
+  spikes at the autocall (S/S₀ = 1.00) and KI (S/S₀ = 0.70) barriers
+  — not a Greek you could publish on a desk daily risk report.
+- **Smoothed MC Γ** (green) tracks the PDE Γ curve almost exactly,
+  with a tight ribbon. Same paths, same bump size — just the
+  indicator → sigmoid swap, and Γ goes from "unusable" to "publishable".
+- **PDE Γ** (red) is the deterministic reference."""
 )
 
 code(
@@ -249,18 +288,33 @@ fig.tight_layout(); plt.show()
 md(
     r"""## 4. Bias-variance trade-off in $k$
 
-The smoothing parameter $k$ is the standard quant-engineering knob:
+The smoothing parameter $k$ is the standard knob the quant
+implementing this would tune:
 
-* **Large $k$** → tight sigmoid → small price bias, but Γ regains the
-  hard-payoff blow-up near the barrier because the transition region
-  becomes narrow relative to the bump.
-* **Small $k$** → wide sigmoid → big price bias (the payoff is materially
-  smeared), but the gradient signal becomes very stable.
+* **Large $k$** → tight sigmoid (close to the step function) →
+  *small price bias* (the smoothed payoff barely differs from the
+  hard one), but Γ regains the hard-payoff noise near the barrier
+  because the transition region becomes narrow relative to the bump.
+* **Small $k$** → wide sigmoid (gentle curve) → *big price bias*
+  (the payoff is materially smeared away from the true indicator),
+  but the gradient signal becomes very stable.
 
-We sweep $k \in \{20, 50, 100, 200, 500\}$ at the base ATM fixings and
-record (a) the price bias vs hard MC and (b) the at-the-money Γ standard
-error. The desk-default $k = 100$ choice sits in the sweet spot: bias
-within a few SE of hard, Γ-SE an order of magnitude tighter."""
+There's no free lunch — you trade price bias for Γ variance. We
+sweep $k \in \{20, 50, 100, 200, 500\}$ at the base ATM fixings and
+record two things:
+
+(a) **Price bias** of smoothed MC vs hard MC, measured in
+multiples of hard-MC standard error. < 5 SE means the smoothed
+price is statistically indistinguishable from the hard price at
+this path budget.
+
+(b) **Worst Γ standard error** under smoothed payoff, relative to
+the hard estimator's. Values < 1 mean smoothing strictly improved Γ;
+values < 0.5 mean it cut Γ-SE in half.
+
+The desk-default $k = 100$ choice typically sits in the sweet spot:
+price bias within a few SE of hard MC, Γ-SE an order of magnitude
+tighter."""
 )
 
 code(
@@ -295,15 +349,18 @@ df_k.round(4)
 )
 
 md(
-    r"""**Reading the table.** Two columns matter:
+    r"""**Reading the table.** The two columns that matter are:
 
-* `|bias| / hard SE` is the price bias of the smoothed estimator measured
-  in hard-MC SE units. A value < 5 means the smoothed price is
-  indistinguishable from the hard price at our path budget.
-* `worst Γ SE ratio` is how much tighter the smoothed Γ is relative to the
-  hard Γ. Values below 1.0 mean smoothing is strictly improving the
-  Γ signal — at $k = 100$ on this product, that ratio is typically
-  around 0.1–0.3."""
+* `|bias| / hard SE` — price bias of the smoothed estimator measured
+  in hard-MC standard errors. A value of, say, 2 means the smoothed
+  price is 2 SE away from the hard price — still well within
+  statistical indistinguishability at the 95% level. Anything below
+  5 is fine for desk reporting.
+* `worst Γ SE ratio` — how much tighter the smoothed Γ is relative
+  to the hard Γ, taken over the per-name Γ estimates. Values below
+  1.0 mean smoothing is strictly improving the Γ signal; at
+  $k = 100$ on this product, the ratio is typically around 0.1–0.3
+  (i.e. 3–10× tighter Γ SE)."""
 )
 
 # ---------------------------------------------------------------------------
@@ -311,40 +368,48 @@ md(
     r"""## 5. Discussion + desk default
 
 **The picture.** The smoothed payoff turns bump-and-revalue Δ/Γ from
-"useful in the bulk, broken at the barriers" into "useful everywhere".
-The cost is a small, controllable bias on the central price that is
-within the MC standard error at desk-standard path budgets.
+"useful in the bulk, broken at the barriers" into "usable
+everywhere". The cost is a small, controllable bias on the *central
+price* — which the desk can absorb by reporting the hard price for
+the trade ticket and the smoothed Greeks for risk reports, treating
+the two as independent estimators with different trade-offs.
 
 **Recommended default for this product:** $k_{ac} = k_{ki} = 100$.
 
-* On the at-the-money textbook fixings the price bias is under 5 standard
-  errors at 20k paths (table above), i.e. invisible in any reasonable
-  reporting cadence.
-* Γ standard errors are 3–10× tighter, depending on proximity to the
-  barriers.
-* The transition width of the sigmoid is ~1% of barrier in each direction,
-  which is just wider than the desk-standard 1% spot bump used to compute
-  the Greek itself — so the bump never straddles the discontinuity.
+- At the at-the-money fixings the price bias is under 5 standard
+  errors at 20k paths (see the table above) — statistically
+  indistinguishable from hard MC.
+- Γ standard errors come down by 3-10× depending on proximity to
+  the barriers — the worst-case ratio in the table.
+- The transition width of the sigmoid at $k=100$ is roughly 1% of
+  the barrier level in each direction — just wider than the
+  desk-standard 1% spot bump used to compute the Greek itself. So
+  the bump never straddles the smoothed transition, which is what
+  keeps the gradient signal clean.
 
-**Caveats.**
+**Caveats — what this *doesn't* do automatically:**
 
-* The smoothed price is biased — the desk should report the *hard* price
-  on the trade ticket and use the smoothed payoff *only* for the Greeks
-  shipped to risk. Treating them as independent estimators is the right
-  mental model.
-* The bias scales with the proximity of the worst-of's distribution to the
-  barriers; for a deeply OTM or deeply ITM trade the smoothing bias is
-  bigger relatively. A production system would scale $k$ adaptively with
-  the time-to-barrier rather than picking a global constant.
-* This complements rather than replaces the variance-reduction work in
-  Phase 6 (worst-of put control variate). The CV tightens the *price*; the
-  smoothed payoff tightens the *Greeks*.
+- **The smoothed price is biased.** Report the *hard* price on the
+  trade ticket and the *smoothed* Greeks on the risk report. They're
+  two estimators with different bias/variance trade-offs, both
+  computed from the same simulated paths.
+- **The optimal $k$ depends on the trade's distance from the
+  barriers.** A deeply ITM trade where no path is close to the
+  barriers can use a much larger $k$ (less bias) without hurting Γ.
+  A near-barrier trade needs a smaller $k$ to keep Γ stable but
+  picks up more price bias. A production system would scale $k$
+  adaptively with the worst-of's distance-to-nearest-barrier rather
+  than pick one global constant.
+- **This complements rather than replaces the control variate in
+  notebook 06.** The CV tightens the SE on the *price*; the smoothed
+  payoff tightens the SE on the *Greeks*. Stacking both gives the
+  desk-grade pricer.
 
-**Phase 8 closes the "Honest finding" from Phase 5.** The Δ-vs-spot ribbon
-that motivated this notebook is now flat against the PDE reference. The
-Γ surface, which Phase 5 left as "the textbook discontinuous-payoff
-failure mode of bump-and-revalue MC", now lands inside a tight band on
-the PDE benchmark."""
+**Closing notebook 05's honest finding.** The Δ-vs-spot ribbon that
+notebook 05 left "broken at the barriers" is now flat against the
+PDE reference. The Γ surface, which notebook 05 left as the textbook
+example of bump-and-revalue MC's discontinuous-payoff failure mode,
+now lands inside a tight band on the PDE benchmark."""
 )
 
 # ---------------------------------------------------------------------------
