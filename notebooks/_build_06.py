@@ -25,40 +25,58 @@ def code(text: str) -> None:
 md(
     r"""# 06 — Variance reduction: worst-of European put control variate
 
-Antithetic variates buy us ≈ $\sqrt{2}\times$ improvement in MC standard
-error on this product, essentially for free. To go further we layer on a
-**control variate** (CV): a related instrument we can also compute on
-each path, whose expected value we know (or can estimate cheaply), and
-whose payoff is correlated with the FCN PV.
+Antithetic variates already gave us a ~$\sqrt{2}\times$ tighter MC
+standard error essentially for free (we used antithetic in notebooks
+03-05). To go further we add a **control variate**: a second instrument
+we can price on every path alongside the FCN. If we pick the CV well,
+its per-path payoff is strongly correlated with the FCN's per-path PV,
+and that correlation lets us cancel out a chunk of the random sampling
+noise.
 
-The natural choice for an FCN is a **worst-of European put** struck at
-the knock-in level $K = 0.70 \times S_0$. The FCN's downside risk lives
-in the knocked-in region — exactly where the worst-of put pays. The two
-PVs are strongly anti-correlated (the FCN loses when the put pays), and
-that correlation translates directly into a variance-reduction multiplier.
+**Why a worst-of European put is the natural CV.** The FCN's variance
+is dominated by what happens in the *knocked-in* region — the paths
+where the worst-of finishes below the strike. That's exactly where a
+European put on the worst-of pays. The two PVs are **strongly
+anti-correlated** by construction: when the worst-of's terminal value
+is low, the FCN loses (KI payoff) and the put gains. The stronger
+that anti-correlation, the bigger the variance reduction.
 
-**The estimator** (METHODOLOGY §2.2). Let $X$ = FCN discounted PV per
-path and $Y$ = worst-of put discounted PV per path on the *same* path.
-Then
+**How the estimator works.** For each path we compute two numbers:
+- $X$ = the FCN's discounted PV on that path
+- $Y$ = the worst-of European put's discounted PV on the same path
+  (same simulated underlying, just a different payoff)
+
+We also need $\mathbb{E}[Y]$, the put's true expected value, which we
+estimate cheaply once via a large pre-pass with a different seed (so
+it's independent of the main MC run). Then the CV-corrected estimator
+is:
 $$\widehat{X}_{cv} = \bar X - \hat\beta \,(\bar Y - \mathbb{E}[Y]),\qquad
 \hat\beta = \frac{\widehat{\mathrm{Cov}}(X, Y)}{\widehat{\mathrm{Var}}(Y)}.$$
-$\hat\beta$ is estimated in-sample from the main MC run; $\mathbb{E}[Y]$
-comes from an independent pre-pass with more paths (and a different seed)
-so the correction has the right unbiasedness property. Theoretically the
-optimal variance is
+
+The intuition: if the main sample's mean of $Y$ happens to come in
+high (random luck), $X$ probably came in low (because they're
+anti-correlated). The correction $-\hat\beta(\bar Y - \mathbb{E}[Y])$
+nudges the FCN estimate back toward its true mean. The coefficient
+$\hat\beta$ is a standard linear-regression slope, computed in-sample.
+
+The theoretical best you can do is:
 $$\mathrm{Var}(X_{cv}) = (1 - \rho_{XY}^2) \cdot \mathrm{Var}(X),$$
-which means a corr(X,Y) of $-0.7$ would cut variance roughly in half;
-$-0.9$ would cut it by a factor of $\approx 5$.
+where $\rho_{XY}$ is the per-path correlation between FCN PV and put
+PV. A $\rho$ of $-0.7$ gives you ~50% variance reduction; $-0.9$ gives
+roughly 5×; $-1.0$ (perfect anti-correlation) would eliminate variance
+entirely. We don't expect $\rho$ to hit $\pm 1$ because the put is
+zero on the autocalled and par-at-maturity paths — only the
+knocked-in paths drive the correlation.
 
 **Reading order**
 1. Setup — same 3-asset FCN.
-2. Headline: price with and without CV at fixed budget; report
-   $\mathrm{Var}(X)/\mathrm{Var}(X_{cv})$ and the SE collapse.
-3. Pathwise visualisation: $X$ vs $Y$ scatter — the correlation is the
-   thing that the CV exploits.
-4. Convergence: how the CV variance-reduction ratio depends on the
-   $\mathbb{E}[Y]$ pre-pass size.
-5. Discussion."""
+2. Headline: price with and without CV at the same path budget; report
+   the variance-reduction ratio and the SE collapse.
+3. The X-vs-Y scatter plot — visually shows where the correlation
+   lives (the knocked-in wedge) and where it doesn't (autocalled +
+   par-at-maturity sit at Y=0).
+4. How big does $\mathbb{E}[Y]$'s pre-pass need to be? Sweep and see.
+5. Discussion + what could push the variance reduction further."""
 )
 
 code(
@@ -88,9 +106,9 @@ np.set_printoptions(suppress=True, precision=6)
 
 # ---------------------------------------------------------------------------
 md(
-    """## 1. Setup — same 3-asset FCN as in notebook 03
+    """## 1. Setup
 
-We're reusing the AMZN/META/MU snapshot from Phase 3 and the same product."""
+Same AMZN/META/MU snapshot and 6-observation FCN as notebook 03."""
 )
 code(
     """ISSUE_DATE = date(2025, 10, 17)
@@ -132,15 +150,18 @@ product = FCNProduct(
 md(
     """## 2. With vs without CV at fixed path budget
 
-We hold the main-pass path count fixed at 40,000 antithetic primal paths
-(= 80k effective) and compare:
-- the standard MC estimator (antithetic only, no CV),
-- the same sample with the worst-of put CV applied.
+Fair comparison: hold the main-pass path count fixed at 40,000
+antithetic primal paths (= 80k effective) and price the FCN two ways:
 
-The CV uses a separate 200k-path pre-pass to estimate $\\mathbb{E}[Y]$
-with very small Monte Carlo error — that pre-pass is "spent once" and
-amortises across all future pricings of this product on this market
-snapshot."""
+- the standard MC estimator (antithetic only, no control variate)
+- the same paths with the worst-of put CV applied on top
+
+The CV needs $\\mathbb{E}[Y]$ — the put's true expected value — which
+we estimate with a separate 200,000-path pre-pass at a different seed
+so it's independent of the main run. That pre-pass is computed *once*
+per market snapshot; once we have $\\mathbb{E}[Y]$, every subsequent
+pricing on the same underlyings reuses it for free. So in production
+the cost of the pre-pass amortises across many trades."""
 )
 code(
     """N_MAIN = 40_000
@@ -169,12 +190,13 @@ df.round({'price': 4, 'SE': 4, 'SE / price (bps)': 1})
 """
 )
 md(
-    f"""**The headline number** is the variance-reduction ratio:
-$\\mathrm{{Var}}(X)/\\mathrm{{Var}}(X_{{cv}})$. The standard-error ratio is
-its square root — that's the multiplier on the budget you'd need to reach
-the same SE without the CV.
+    f"""**The headline number** is the variance-reduction ratio
+$\\mathrm{{Var}}(X)/\\mathrm{{Var}}(X_{{cv}})$. Its square root tells
+you how much extra path budget you'd need *without* the CV to reach
+the same SE. A 4× variance reduction = you'd need 4× the paths
+without the CV.
 
-(Read directly off `cv.cv_diagnostics`.)"""
+The next cell reads the diagnostic numbers off the run."""
 )
 code(
     """print(f"β̂                  = {diag['beta_hat']:+.4f}")
@@ -191,9 +213,11 @@ print(f"Pre-pass paths    = {diag['n_paths_for_ey']:,}")
 md(
     r"""## 3. Why it works — scatter of $X$ vs $Y$ per path
 
-The CV exploits whatever linear correlation exists between $X$ (the FCN
-PV) and $Y$ (the worst-of put PV). For an FCN, the structure is
-particularly clean:
+The CV's variance reduction depends on one thing: how correlated are
+the per-path FCN PV ($X$) and per-path put PV ($Y$)? Plotting them
+against each other on a per-path basis makes the structure visible.
+
+For our FCN, the per-path geometry splits naturally into three regimes:
 
 - **Autocalled paths** ($W$ rises above 100% early) get full notional +
   some coupons; $X$ is high. The worst-of put pays $0$ at maturity for
@@ -256,27 +280,35 @@ fig.tight_layout(); plt.show()
 """
 )
 md(
-    """The autocalled and par-at-maturity paths cluster at $Y = 0$ and any
-correlation is among the knocked-in paths. Visually that's exactly the
-left edge of the cloud — the CV pulls the noise out of that wedge,
-which is where the bulk of the FCN's path-level variance lived in the
-first place."""
+    """**Reading the scatter:** the autocalled and par-at-maturity paths
+all land at $Y = 0$ on the right side of the chart — the put is
+worthless on those paths, so there's no information for the CV to
+exploit there. All the action is in the **left wedge** where the
+worst-of finished below the 70% strike (knocked-in paths). That's
+where $X$ and $Y$ move in opposite directions, that's where the
+correlation comes from, and that's where the CV pulls noise out of
+the estimator. Knocked-in paths are also where the FCN's
+*path-level variance* concentrates — so the CV is removing noise
+from the exact place it lives."""
 )
 
 # ---------------------------------------------------------------------------
 md(
-    r"""## 4. How big does $\mathbb{E}[Y]$'s pre-pass need to be?
+    r"""## 4. How big does the pre-pass need to be?
 
-There's a tension. A larger pre-pass means a more accurate
-$\hat{\mathbb{E}[Y]}$, which means the CV correction is cleaner — but the
-pre-pass itself costs paths. In practice the pre-pass is "spent once"
-per market snapshot (you can amortise it across many product pricings
-on the same underlyings), so the cost is small in any production
-setting.
+The CV needs $\mathbb{E}[Y]$, the put's true expected value. We
+estimate it from a separate pre-pass — but the pre-pass itself isn't
+free, it consumes paths. So there's a trade-off: larger pre-pass →
+more accurate $\mathbb{E}[Y]$ → cleaner CV correction → tighter
+final SE, but at higher upfront cost.
 
-We sweep pre-pass sizes against the resulting CV SE on a fixed main
-sample. The expectation is a flat curve — once $\mathbb{E}[Y]$ is
-well-estimated, more pre-pass paths don't help."""
+In production the trade-off is mostly moot because the pre-pass is
+computed *once* per market snapshot and amortises across every future
+pricing on the same underlyings. But it's worth checking how big it
+needs to be for the CV's benefit to saturate. We sweep pre-pass sizes
+on a fixed main sample and watch the CV's standard error as we add
+more pre-pass paths. Expectation: a flat curve once the pre-pass is
+big enough — beyond that point, more pre-pass paths don't help."""
 )
 code(
     """pre_sizes = [5_000, 10_000, 25_000, 50_000, 100_000, 200_000, 400_000]
@@ -312,51 +344,67 @@ fig.tight_layout(); plt.show()
 """
 )
 md(
-    """The CV SE flattens once the pre-pass is large enough that its
-contribution to the total CV variance is negligible compared to the
-main-sample sampling noise. After that point, adding pre-pass paths
-gives no further improvement."""
+    """**Reading the chart.** The CV's standard error drops sharply at
+small pre-pass sizes (the $\\mathbb{E}[Y]$ estimate is still noisy,
+so the CV correction is itself adding variance back) and then flattens
+out. The flat region is where $\\mathbb{E}[Y]$ is known well enough
+that its remaining noise is invisible compared to the main-sample
+variance — adding more pre-pass paths past that point is wasted work.
+The dashed red line is the no-CV SE for reference; the gap between
+the flat curve and that line is the CV's actual benefit."""
 )
 
 # ---------------------------------------------------------------------------
 md(
     r"""## 5. Discussion
 
-**What the numbers show.** The worst-of European put CV gives a variance
-reduction of roughly $2$–$5\times$ on this product at the current
-calibration, which translates to a $\sqrt{2}$–$\sqrt{5} \approx 1.4$–$2.2\times$
-collapse in standard error. Combined with antithetic variates
-(~$\sqrt{2}\times$), the total path-budget savings to reach a target SE
-are a factor of $\sim 4$–$10$.
+**What the numbers show.** On our FCN, the worst-of put control
+variate delivers a **2–5× variance reduction** at the current
+calibration — translating to **~1.4–2.2× tighter standard error**
+for the same path budget. Stacked with antithetic variates (which
+gives another √2), the total path-budget saving for a fixed target SE
+is roughly **4–10×**. That's the kind of efficiency gain that turns
+"this Greek table takes an hour to compute" into "this Greek table
+takes 10 minutes".
 
-**Why $\rho_{XY}$ is the headline.** The theoretical CV variance is
-$(1 - \rho_{XY}^2)\cdot \mathrm{Var}(X)$. A $\rho = -0.5$ buys 25%
-variance reduction; $\rho = -0.7$ buys 49%; $\rho = -0.9$ would buy 81%.
-The achievable $\rho$ for an FCN is bounded above by how well the
-worst-of put captures the FCN's downside variability — which is high in
-the knocked-in region but exactly zero everywhere else. So we can't
-expect $|\rho_{XY}|$ to approach $1$; the loss-tail PV correlation is a
-hard ceiling.
+**Why the per-path correlation is the headline.** The theoretical
+variance-reduction formula is $\mathrm{Var}(X_{cv}) = (1 - \rho_{XY}^2)
+\cdot \mathrm{Var}(X)$. A small change in $\rho$ produces a much
+larger change in the variance ratio:
+- $\rho = -0.5$ → 25% variance reduction (1.33× ratio)
+- $\rho = -0.7$ → 49% variance reduction (1.96× ratio)
+- $\rho = -0.9$ → 81% variance reduction (5.3× ratio)
+- $\rho = -1.0$ → variance eliminated entirely (theoretical ceiling)
 
-**Where else to push.** Three obvious extensions:
+For our FCN, $\rho$ can't reach $-1$ because the put is exactly zero
+on the autocalled and par-at-maturity paths (no correlation
+information there). The correlation only lives in the knocked-in
+wedge, which caps the achievable $|\rho|$ somewhere below 1. That's
+a structural ceiling, not an engine bug.
 
-1. **Multiple CVs.** Stack the worst-of put with an autocall-bond CV
-   (the autocall region also has known $\mathbb{E}[Y]$ under simple
-   approximations) to mop up variance on the other end of the
-   distribution. Treat as a linear regression of $X$ on the basis of
-   CV payoffs.
-2. **Stratified sampling on $W(T)$.** Partition the paths by their final
-   worst-of and balance the sample across strata. Particularly effective
-   for the loss-tail probability estimate (which feeds the
-   `probability_decomposition` reporting).
-3. **Quasi-Monte Carlo.** Replace `numpy.random.standard_normal` with a
-   Sobol' sequence + Brownian bridge. Cleaner convergence in 1D and 2D;
-   slightly subtler in 3D+ but well-documented for this class of
-   product. Outside the scope here but a natural next move.
+**Where you'd push next if this were a production engine** — three
+natural extensions, all out of scope here but worth flagging:
 
-For a portfolio piece we stop here: the CV is wired in, exercised in
-tests, demonstrated in the notebook, and the variance reduction is
-visible and reproducible."""
+1. **Stack a second CV.** Add an autocall-bond CV alongside the
+   worst-of put. The autocall region has its own known expected
+   value (par + a few discounted coupons under simple approximations)
+   so we can mop up variance on that side of the distribution too.
+   The two CVs combine via linear regression of $X$ on both $Y$s.
+2. **Stratified sampling on the worst-of's terminal value.** Partition
+   paths by their final worst-of (above autocall / between barriers /
+   knocked in) and balance the sample so each stratum gets a
+   predictable count. Particularly useful for the
+   tail-probability estimates the dashboard reports.
+3. **Quasi-Monte Carlo.** Replace the pseudo-random `standard_normal`
+   draws with a low-discrepancy sequence (e.g. Sobol' + Brownian
+   bridge). Convergence improves from $1/\sqrt{N}$ toward $1/N$ in
+   low dimensions; the 3-asset × 184-step grid is high-dimensional
+   enough that the benefit shrinks, but it's still a clean win.
+
+For a portfolio piece we stop here. The CV is wired into
+`src/mc_pricer.py`, tested in `tests/test_mc_pricer.py`, demonstrated
+in this notebook, and gives a visible reproducible variance
+reduction — that's the deliverable."""
 )
 
 # ---------------------------------------------------------------------------
