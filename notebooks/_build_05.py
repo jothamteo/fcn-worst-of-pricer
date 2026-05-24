@@ -25,33 +25,40 @@ def code(text: str) -> None:
 md(
     r"""# 05 — Greeks: bump-and-revalue MC vs off-grid PDE
 
-This notebook reports Δ, Γ, vega and pairwise correlation sensitivity for
-the worst-of FCN, computed two ways:
+This notebook computes the FCN's Greeks — Δ (spot sensitivity), Γ
+(curvature), vega (vol sensitivity), and pairwise cega (correlation
+sensitivity) — using two engines, and checks they agree.
 
-1. **MC, bump-and-revalue with common random numbers (CRN).** Pre-draw a
-   single block of standard normals; re-price the FCN with one parameter
-   nudged $\pm\epsilon$, reusing the same normals so the only difference
-   between the up and down evaluations is the parameter itself. The
-   finite-difference signal is the sensitivity; the rest of the sampling
-   noise cancels along the path.
-2. **PDE, off-grid finite differences.** The 1D Crank–Nicolson grid gives us
-   $V(S, t=0)$ across a fan of spot levels; Δ and Γ at $S = S_0$ come from
-   a 3-point central difference along that grid. Vega is a small bump-and-
-   revalue at the PDE level — no Monte Carlo, no noise.
+**The two engines**
 
-**Headline plot.** Δ as a function of spot, near the autocall and KI
-barriers, with the MC ± 1σ error band overlaid on the PDE reference. This
-is the "MC Greeks are noisy near barriers" demonstration that motivates
-all the variance-reduction work in Phase 6.
+1. **MC, bump-and-revalue with common random numbers.** The standard
+   trick: pre-draw a block of random numbers, then price the FCN twice
+   — once at the current input, once with one parameter bumped up by a
+   tiny amount — using the **same** noise both times. The price
+   difference is the Greek. Reusing the noise means the random-sampling
+   error largely cancels between the two runs, so the signal we measure
+   is the parameter effect itself.
+
+2. **PDE, off-grid finite differences.** The Crank–Nicolson PDE from
+   notebook 04 gives us the FCN's value across a whole range of spot
+   levels at $t=0$. Δ and Γ at today's spot fall straight out of a
+   3-point central difference on that curve. Vega is a small bump at
+   the PDE level — deterministic, no random noise.
+
+**Headline plot.** Δ as a function of spot, near both the autocall and
+KI barriers, with MC's noise band overlaid on PDE's smooth reference.
+This shows the well-known weakness of bump-and-revalue MC Greeks —
+they get noisy near a barrier where a tiny bump can flip a path's
+outcome — and is the motivation for the smoothed-payoff work in
+notebook 08.
 
 **Reading order**
 1. Setup — same 3-asset FCN as in notebook 03.
-2. The 3-asset Greeks table (MC only — PDE is single-asset, Phase 4).
-3. Single-asset cross-validation: MC vs PDE Greeks should agree well in the
-   middle of the distribution; the interesting failure mode is at the
-   barriers.
-4. Δ-vs-spot scan: MC noise blows up near the KI and AC barriers; the PDE
-   stays smooth.
+2. The 3-asset Greeks table (MC only — PDE only handles single-asset).
+3. Single-asset cross-validation: MC vs PDE Greeks should agree away
+   from the barriers; Γ is the loosest because it's the noisiest
+   estimator.
+4. Δ-vs-spot scan: MC noise spikes near the KI and AC barriers; PDE stays smooth.
 5. Discussion.
 """
 )
@@ -80,9 +87,9 @@ np.set_printoptions(suppress=True, precision=6)
 
 # ---------------------------------------------------------------------------
 md(
-    """## 1. Setup — re-use the Phase 3 market snapshot
+    """## 1. Setup
 
-Same as-of-date AMZN/META/MU basket and the same 6-observation FCN."""
+Same AMZN/META/MU snapshot and 6-observation FCN from notebook 03."""
 )
 code(
     """ISSUE_DATE = date(2025, 10, 17)
@@ -124,14 +131,21 @@ product = FCNProduct(
 md(
     """## 2. 3-asset MC Greeks (the headline)
 
-The standard desk table: Δ, Γ, vega per name plus the off-diagonal
-correlation sensitivities. We run at 80,000 antithetic primal paths
-(= 160k effective), seed pinned for reproducibility.
+The standard desk risk table — Δ, Γ, vega per name plus pairwise
+correlation sensitivities. 80,000 antithetic primal paths (= 160k
+effective), seed pinned.
 
-The desk-scaled columns are the more legible ones:
-- **Δ_per_1%**: value change for a 1% spot move (= Δ · S₀ / 100).
-- **Γ_per_1%×1%**: value change from a 1% Γ contribution (= Γ · S₀² / 10,000).
-- **vega_per_volpt**: value change for a 1 vol-pt bump (= vega / 100)."""
+The "raw" Greeks are mathematical derivatives (∂V/∂S, ∂²V/∂S², ∂V/∂σ).
+Those numbers are awkward to interpret — derivatives are per *unit* of
+input, but a "unit" of spot is $1 of share price, which isn't how
+anyone thinks about moves. The desk-scaled columns are the more
+useful ones:
+
+- **Δ_per_1%**: dollar value change from a 1% relative spot move (= Δ · S₀ / 100).
+- **Γ_per_1%×1%**: the convexity contribution from a 1% × 1% spot move (= Γ · S₀² / 10,000).
+- **vega_per_volpt**: dollar value change from a +1 vol-point bump (= vega / 100).
+
+Use these when reading the table."""
 )
 code(
     """mc_greeks = mc_greeks_bump(
@@ -178,31 +192,38 @@ pd.DataFrame(corr_rows).round(4)
 """
 )
 md(
-    r"""**Reading the table.** Three economic checks the numbers should pass:
+    r"""**Reading the table.** Three things the signs should pass before
+you trust the numbers — these are what a desk would eyeball first:
 
-1. **Δ > 0 in each name.** The note is long-the-basket — every name moving
-   up reduces the probability of a knock-in and pushes the worst-of toward
-   the autocall, both of which lift the price.
-2. **vega < 0 in each name.** A higher vol on any single name fattens the
-   distribution of its worst-case, increases KI risk, and hurts the FCN
-   holder. Classic "short-vol" structure.
-3. **Cross-correlation sensitivity is positive.** Counterintuitive at
-   first — usually correlation is "bad" for an option holder. But the
-   FCN is short a worst-of option, so the *issuer's* short position
-   benefits when names are decorrelated (more chance a single name drops
-   below the KI). The **holder** (the note investor) wants high
-   correlation: the names move together, the worst-of stays well-behaved.
-   Positive ρ_pair is the right sign."""
+1. **Δ > 0 on every name.** The investor is *long the basket*. Each
+   name moving up reduces KI risk (worst-of stays away from 70%) and
+   pulls the worst-of toward the autocall (which terminates with par +
+   coupon). Both effects lift the FCN's value.
+2. **vega < 0 on every name.** The investor is *short vol*. Higher
+   vol on any one name fattens its loss-tail, raises KI probability,
+   and hurts the structure. Classic short-vol exposure — same shape
+   as any short-put position.
+3. **Pairwise correlation sensitivity is positive.** Slightly
+   counter-intuitive: usually correlation is "bad" for option holders.
+   But here the investor is *short* a worst-of put. When names
+   decorrelate, the worst-of's distribution gets wider (one name can
+   crash while others rally), which raises KI probability — bad for
+   the short-put-side investor. So the investor *wants* the names to
+   move together — positive cega is the right sign."""
 )
 
 # ---------------------------------------------------------------------------
 md(
     """## 3. Single-asset cross-validation — MC vs PDE
 
-Drop to the AMZN-only reduction and price the same Greeks both ways. The
-PDE is the deterministic benchmark — we should land within a small
-multiple of the MC SE on Δ and vega. Γ is the loosest: bump-and-revalue
-Γ has notoriously high variance, and we expect a wider gap.
+Same trick as notebook 04's cross-validation: drop to the AMZN-only
+reduction (worst-of operator becomes identity for one asset), compute
+the Greeks both ways, check the numbers agree.
+
+Expect Δ and vega from MC to land within a few MC standard errors of
+the PDE benchmark. Γ is the loosest — bump-and-revalue Γ is a
+notoriously noisy estimator (the next cell explains why), so the gap
+will be wider on that one.
 """
 )
 code(
@@ -243,28 +264,58 @@ pd.DataFrame(rows).round(4)
 """
 )
 md(
-    r"""On Δ and vega the MC value is well inside a few standard errors of the
-PDE benchmark. Γ is structurally harder — the central-difference estimator
-$\Gamma \approx (V_+ - 2V_0 + V_-) / \epsilon^2$ divides a small finite
-difference by $\epsilon^2$, so any sampling noise in the numerator gets
-amplified. CRN helps a lot but cannot eliminate it."""
+    r"""**Δ and vega** land well inside a few standard errors of the PDE
+benchmark — exactly what you'd want from two independent engines.
+
+**Γ is structurally harder to estimate.** Γ is the *second* derivative
+of price with respect to spot, computed by a 3-point central
+difference:
+$$\Gamma \approx \frac{V_+ - 2V_0 + V_-}{\epsilon^2}.$$
+The numerator is a *small* number (two big prices nearly cancelling)
+divided by a *tiny* number ($\epsilon^2$, where $\epsilon$ is the bump
+size, e.g. 1% of spot). Any sampling noise in the prices gets amplified
+by $1/\epsilon^2$ in the ratio — so even small per-path noise produces
+a noticeable wobble in the Γ estimate. CRN helps a lot (the cancellation
+between $V_+$ and $V_-$ is much tighter when they share noise), but
+can't eliminate the structural variance from the second-derivative
+geometry. So a wider Γ gap to the PDE is the expected outcome, not a
+bug."""
 )
 
 # ---------------------------------------------------------------------------
 md(
     r"""## 4. The headline plot — Δ vs spot
 
-The PDE Δ is smooth. The MC Δ should track it in the bulk of the
-distribution and visibly disagree (in the form of a wide error band) near
-the **autocall barrier at S/S₀ = 1.00** and the **knock-in barrier at
-S/S₀ = 0.70**. The mechanism: at those levels, bumping spot up vs down
-can flip a path's outcome between "autocalled" and "alive", or between
-"knocked in" and "above strike". The bumped-payoff difference becomes
-discontinuous in $\epsilon$, the variance explodes, and you need either
-(a) more paths, (b) a wider bump (which biases the Greek), or (c) a
-smoothed payoff to get a clean estimate. This is the textbook
-"discontinuous payoff" failure mode of bump-and-revalue MC Greeks
-(Glasserman §7.2)."""
+Sweep AMZN's spot from well below the KI strike (50%) up to well above
+the autocall barrier (130%), and at each spot level compute Δ both
+ways — MC and PDE. Plot them together with the MC's error band shown
+as a ribbon.
+
+**What you should see** — and what motivates the smoothed-payoff work
+in notebook 08:
+
+- The PDE Δ is a **smooth curve**: deterministic, well-behaved
+  everywhere.
+- The MC Δ tracks PDE closely in the **bulk** of the distribution
+  (where the worst-of is comfortably between the two barriers).
+- The MC ribbon **widens dramatically** at two specific spot levels:
+  `S/S₀ = 1.00` (the autocall barrier) and `S/S₀ = 0.70` (the strike /
+  KI barrier).
+
+**Why the MC noise spikes at the barriers:** at those spot levels, a
+±ε bump in spot can flip a path's outcome between two completely
+different regimes — "autocalled at obs 1 with par + small coupon" vs
+"alive, continues to obs 2"; or "knocked in, takes the worst-of
+downside" vs "above strike, gets full par". The per-path payoff
+*difference* between the bumped and unbumped runs jumps from a small
+number (sensitivity) to a huge number (regime switch), and the
+estimator's variance blows up.
+
+This is the textbook "discontinuous payoff" failure mode of
+bump-and-revalue MC Greeks (Glasserman 2003, §7.2). The three ways
+out: (a) throw more paths at it (expensive, slow convergence), (b)
+use a wider bump (biases the Greek), or (c) replace the hard payoff
+with a smoothed version — option (c) is what notebook 08 does."""
 )
 code(
     """# Sweep the AMZN spot only — keep the others at base.
@@ -301,53 +352,65 @@ fig.tight_layout(); plt.show()
 """
 )
 md(
-    r"""**Two things worth pointing at.**
+    r"""**Two things worth pointing at in the plot:**
 
-1. **The MC ribbon widens near both barriers.** Near `S/S₀ = 1.00` the
-   bump occasionally flips a path between "autocalled at period 1" and
-   "continues", which is a discrete jump of size $\sim N - c$ in the
-   per-path PV — so the path-level difference becomes very noisy, even
-   under CRN. Near `S/S₀ = 0.70` the same thing happens at maturity
-   with the KI event.
-2. **The PDE curve does not see this.** It evaluates the option's value
-   as a function of spot on a continuum, with the discrete-event handling
-   baked in analytically — there's no path to flip and no bump-noise to
-   blow up. This is exactly why the PDE was worth building: it gives us
-   a clean reference for the Δ surface that MC can only approximate
-   noisily."""
+1. **The MC ribbon widens near both barriers.** Near `S/S₀ = 1.00`
+   the ±1% spot bump occasionally flips a path between "autocalls at
+   obs 1, redeems at par + first coupon" and "doesn't autocall,
+   continues to obs 2" — a jump of roughly notional - one coupon in
+   the per-path payoff. Near `S/S₀ = 0.70` the same thing happens at
+   maturity with the KI check. The per-path differences become
+   bimodal (small for paths that don't flip, huge for paths that do),
+   which is exactly the recipe for high MC variance.
+
+2. **The PDE curve doesn't have this problem.** It computes the
+   option's value as a function of spot on a continuous grid, applying
+   the discrete events (autocall, KI) analytically at every grid node.
+   There's no "path" to flip — the barriers are baked into the maths,
+   not sampled. That's why the PDE was worth building: it gives a
+   reference Δ surface that MC can only approximate noisily."""
 )
 
 # ---------------------------------------------------------------------------
 md(
     r"""## 5. Discussion
 
-**What works.** The 3-asset MC Greeks table agrees with desk intuition
-(long delta, short vega, long correlation) and is reproducible to bit
-precision under CRN. The single-asset cross-validation places MC Δ and
-vega inside the PDE-implied region. The Δ-vs-spot plot makes the
-"MC Greeks are noisy near barriers" story visible without overselling
-it: the bias is bounded and the bulk of the surface is well-estimated.
+**What we got out of this notebook:**
 
-**What this doesn't yet do.** Two follow-ups are deliberately deferred:
+- **3-asset Greeks** that agree with desk intuition: positive Δ on
+  every name (investor is long the basket), negative vega (short
+  vol), positive pair-cega (long correlation). Reproducible to bit
+  precision under common-random-numbers.
+- **Single-asset cross-validation** placed MC Δ and vega inside a few
+  standard errors of the PDE benchmark — both engines agree on the
+  numbers they can both compute.
+- **The Δ-vs-spot plot** showed honestly where bump-and-revalue MC
+  Greeks break down: at the two barrier levels. Bias is bounded; the
+  bulk of the spot range is fine. The barriers are the exception, not
+  the rule.
 
-1. **Pathwise / likelihood-ratio Greeks for the smooth pieces of the
-   payoff** (METHODOLOGY §5.2). Pathwise Δ uses the chain rule along
-   continuous parts of the payoff and gives lower-variance estimates than
-   bump-and-revalue; it does **not** work across the autocall and KI
-   discontinuities, where bump-and-revalue (or a smoothed-payoff variant)
-   remains necessary. We've shown the bump-method noise; integrating a
-   pathwise estimator for the maturity-downside region is the next step.
-2. **A worst-of European put control variate** (METHODOLOGY §2.2) for
-   variance reduction on the FCN itself. That's Phase 6. The control
-   variate would substantially tighten the MC ribbon in the
-   knocked-in region of the Δ scan, where the FCN's variance is
-   dominated by the worst-of put's variance.
+**What this notebook deliberately doesn't do (and where to look
+next):**
 
-**Operationally.** A desk that ships these Greeks daily would want
-CRN-controlled bumps (which we have), a per-path Greek aggregator (which
-we have, via `pv_samples`), and a smoothed-payoff version of the autocall
-indicator for clean Γ near the barriers (which we don't — and the plot
-above is the reason the desk would build it)."""
+1. **Pathwise / likelihood-ratio Greeks.** These are lower-variance
+   estimators that use the chain rule along the *smooth* parts of the
+   payoff instead of bumping. They give cleaner Greeks where they
+   apply but they don't work across discontinuities like the autocall
+   or KI — those still need a smoothed payoff or a bigger bump. We
+   stick with bump-and-revalue throughout this notebook so the
+   limitation is visible; a production pricer would use both, picking
+   the right tool per payoff region.
+2. **A worst-of European put control variate.** That's notebook 06.
+   It tightens the MC standard error on the *price* (and indirectly,
+   on Greeks bumped from that price), particularly on knocked-in
+   paths where the FCN's variance is dominated by the worst-of-put
+   leg.
+
+**What a desk would actually ship.** Daily Greeks under CRN-controlled
+bumps (we have that), a per-path Greek aggregator for risk reports
+(we expose this via `pv_samples`), and a smoothed-payoff version of
+the autocall and KI indicators so Γ doesn't spike at the barriers
+(notebook 08 builds this — the plot above is exactly why)."""
 )
 
 # ---------------------------------------------------------------------------
