@@ -31,41 +31,44 @@ def code(text: str) -> None:
 md(
     r"""# 09 — Hedging analysis (the desk view)
 
-Notebooks 01–08 built the pricer and computed Greeks. This notebook does the
-*next* thing: it converts those Greeks into the concrete actions the dealing
-desk takes on day 1, and quantifies what's left over that can't be neatly
-hedged.
+Notebooks 01–08 built the pricer and computed Greeks. This notebook
+takes the *next* step: it translates those Greeks into the concrete
+actions a dealing desk would take on day 1 of the trade, and quantifies
+the bits of risk that *can't* be cleanly hedged (which the bid-ask
+spread on the original sale has to compensate for).
 
-I'm coming at this as an IT dev who sees these tickets fly past the desk
-every week but has never sat on the other side — the goal is to make the
-Greek-to-share-count translation explicit so I can talk about it in an
-interview without hand-waving.
+Same dealer-side framing as the dashboard: the bank has sold this FCN
+to a client and the desk now holds the short side. Everything below
+is from that perspective — Δ shares to *buy* (to offset short basket
+exposure), listed options to *sell* (to offset long vol exposure),
+and the residual risks that can't be neatly hedged at all.
 
 **Reading order**
 
-1. Trade context — bank sells $1M of the FCN; desk now owns the short side.
-2. Delta hedge — how many of each name to buy.
-3. Vega hedge — how many listed options to short.
-4. Correlation analysis — the risk with no clean hedge.
-5. Unhedgeable risk summary — gap, skew, correlation, in one table.
-6. Hedging frequency and rebalancing — desk practice notes.
+1. **Trade context** — bank sells $1M of the FCN; desk owns the short side.
+2. **Delta hedge** — how many shares of each name to buy.
+3. **Vega hedge** — how many listed options to sell.
+4. **Correlation analysis** — the risk with no clean hedge instrument.
+5. **Unhedgeable risk summary** — gap, skew, correlation, in one table.
+6. **Hedging frequency and rebalancing** — desk-practice notes.
 
-Everything in this notebook *consumes* the Greeks computed in notebooks 05
-and 08; nothing is re-derived. Hedge arithmetic lives in `src/hedging.py`,
-tested in `tests/test_hedging.py`.
+Everything in this notebook *consumes* the Greeks computed in
+notebooks 05 and 08; nothing is re-derived. The hedge arithmetic
+lives in `src/hedging.py` and is unit-tested in `tests/test_hedging.py`.
 
-**Note on settlement method.** The FCN here uses **physical delivery**: if KI
-triggers at maturity, the issuer delivers approximately $N / (K \cdot
-S_{\text{worst}}(0))$ shares of the worst-performer to the client at the
-strike price. The Greek *profile* and the hedge ratios (Δ shares, vega
-options) have the same shape as they would under cash settlement — only the
-magnitudes and the maturity-payoff slope differ. The operational consequence
-on the hedge desk side: the issuer's hedge book needs the **operational
-capacity to source and deliver actual shares** of whichever name turns out
-to be the worst-performer at maturity. For liquid US large-caps (AMZN, META,
-MU) this is routine; on less-liquid names it would require borrow-arrangement
-contingencies. Cash settlement avoids the physical-share leg entirely, at
-the cost of being a harsher payoff for the holder."""
+**Note on settlement method.** This FCN uses **physical delivery**:
+if KI triggers at maturity, the issuer delivers approximately
+$N / (K \cdot S_{\text{worst}}(0))$ shares of the worst-performer
+to the client at the strike price. The Greek *profile* and the
+hedge ratios (Δ shares, vega options) have the same shape as under
+cash settlement — only the magnitudes and the maturity-payoff slope
+differ. The operational consequence for the hedge desk: the book
+needs the capacity to **source and deliver actual shares** of
+whichever name turns out to be the worst-performer at maturity.
+For liquid US large-caps (AMZN/META/MU) this is routine; on
+less-liquid names it would require pre-arranged borrow lines.
+Cash settlement avoids the physical-share leg entirely, at the
+cost of being a harsher payoff for the holder."""
 )
 
 code(
@@ -152,11 +155,13 @@ product = FCNProduct(
 md(
     """## 8.2 — Delta hedge
 
-We consume the Phase 5 Greeks (recomputed here with the same seed so the
-notebook is fully reproducible) and feed them through
-`compute_delta_hedge`. The function rescales the deltas from the pricer's
-50,000 reference notional to the trade's $1M notional — delta is linear in
-notional for this FCN payoff, so this is a simple multiplicative scale."""
+Take the Greeks computed in notebook 05 (recomputed here with the same
+seed for reproducibility) and feed them into `compute_delta_hedge`.
+The function rescales the deltas from the pricer's $50,000 reference
+notional to the trade's $1,000,000 notional — Δ is linear in notional
+for this FCN payoff, so the rescaling is a single multiplication. The
+output is the per-name **share count** the desk needs to buy to
+neutralise the spot leg of the book."""
 )
 
 code(
@@ -207,38 +212,46 @@ df_dh
 )
 
 md(
-    r"""**What the trader does.** The desk buys roughly the share counts in the
-table above — net long stock against the short FCN book. A few practical
-observations:
+    r"""**What the trader does.** The desk buys the share counts in the
+table above — net long stock against the short FCN book. Three
+practical points worth flagging:
 
-* The *total* hedge notional is materially less than the trade notional
-  itself, even though the FCN's economics are tied to all three names. This
-  is because Δ is well below 1.0 per name — the FCN is short-vol on the
-  basket, not a vanilla equity proxy, so its spot-sensitivity is muted.
-* Δ is not stable. It moves as the basket moves (that's Γ) and as time
-  passes (that's the autocall feature getting closer). The desk re-runs this
-  table at least daily; Γ near the barriers (notebook 08) is exactly why
-  intraday re-runs matter when any name approaches `S/S₀ ≈ 1.00` or `≈ 0.70`.
-* If the desk doesn't have stock-borrow availability on one of the names
-  (rare but possible for MU-class names in stress), the delta hedge would
-  partially shift onto futures or onto a short-call position, both of which
-  introduce funding/basis residuals."""
+- The **total hedge notional** is much smaller than the FCN's
+  notional, even though the structure is tied to all three names.
+  That's because per-name Δ is well below 1.0 — the FCN is
+  fundamentally a *short-vol* structure on the basket, not a
+  vanilla equity proxy, so its spot-sensitivity is muted. Roughly
+  speaking, only a fraction of each underlying's notional needs to
+  be carried as a hedge.
+- **Δ isn't stable.** It changes as the basket moves (that's Γ at
+  work) and as time passes (the autocall feature gets closer to
+  triggering). The desk re-runs the Δ table at least daily; near
+  the barriers — where Γ spikes (see notebook 08) — they re-run
+  intraday.
+- **Stock-borrow constraints** can complicate the hedge. If the
+  desk doesn't have borrow availability on one of the names (rare
+  for AMZN/META/MU but possible in stress), the Δ hedge has to
+  shift partially onto futures or onto a short-call position, both
+  of which introduce funding or basis residuals that the original
+  hedge calculation didn't anticipate."""
 )
 
 # ---------------------------------------------------------------------------
 md(
     r"""## 8.3 — Vega hedge
 
-The dealer is on the *opposite* side of the holder's vega. The holder is
-short single-name vol (vol up on any name → KI risk up → holder loses), so
-the dealer is *long* vol on each name. To neutralise, the dealer **sells**
-listed options on the underlyings.
+The dealer's vega is the **mirror image** of the holder's. The
+holder is short single-name vol (higher vol on any name → fatter
+KI tail → holder loses), so the dealer's book is **long vol** on
+each name. To neutralise the long-vol exposure, the dealer **sells
+listed options** on each underlying.
 
-We use ATM 3-month listed calls as the hedge instrument and compute their
-vegas + prices via Black–Scholes at the same flat per-name vol used by the
-pricer. In practice the desk would pull the real chain, but BS at the
-implied vol used to mark the trade is the right *reference* number to size
-the hedge against."""
+We use ATM 3-month listed calls as the hedge instrument and compute
+their vega + price via Black–Scholes at the same flat per-name vol
+the pricer uses. In a real production setting the desk would pull
+the actual options chain and choose strikes / tenors based on a vega
+ladder — but BS at the mark-the-trade vol is the right *reference*
+number to size the headline hedge against."""
 )
 
 code(
@@ -288,37 +301,48 @@ pd.DataFrame(rows)
 )
 
 md(
-    r"""**Reading the table.** The dealer sells ~50–250 listed ATM calls per
-name (the exact count depends on each name's vega and the listed option's
-vega). The premium is *received*, partially offsetting the cost of warehousing
-the position. A few caveats this hedge does not address:
+    r"""**Reading the table.** The dealer sells roughly 50–250 listed ATM
+calls per name (the exact count depends on the FCN's per-name vega
+and on the listed option's vega per contract). The premium from
+those short calls is **received** — partial revenue that helps fund
+warehousing the structured-product position.
 
-* **Smile / skew.** The desk is buying a *flat-vol* listed option to hedge
-  a structured product whose effective vol exposure is concentrated in the
-  *downside skew* (the KI is well out-of-the-money put-side). A real desk
-  hedges the dominant points on the smile separately — typically the 90% put
-  and the 100% call — rather than a single ATM call.
-* **Term structure.** The FCN has a 6.5-month tenor; a 3-month listed call
-  is *not* perfectly maturity-matched. Theta-decay differential is one
-  residual; calendar-spread vega is another.
-* **Cross-Greeks.** vanna (∂Δ/∂σ) and volga (∂vega/∂σ) are not in this
-  hedge — they're typically a second-order concern but pop up after large
-  vol moves.
+This hedge is the *headline* number. Several things it doesn't
+capture:
 
-A production desk would track a *vega ladder* by strike and tenor and hedge
-the dominant components, not the parallel level alone."""
+- **Smile / skew.** We're hedging with a *flat-vol* listed option,
+  but the FCN's effective vol exposure is concentrated on the
+  **downside skew** — the KI is a put at 70% of spot, well
+  out-of-the-money on the put side, which trades at a meaningfully
+  higher implied vol than ATM. A real desk would hedge the
+  dominant points on the smile separately (typically the 90% put
+  alongside the ATM call) rather than just hitting the parallel
+  level.
+- **Term structure.** The FCN has a 6-month tenor; a 3-month
+  listed call isn't perfectly maturity-matched. That mismatch
+  shows up as a small theta-decay differential and a residual
+  calendar-spread vega.
+- **Cross-Greeks.** Vanna (∂Δ/∂σ) and volga (∂vega/∂σ) — the
+  cross-derivatives between spot and vol — aren't covered by this
+  hedge. They're usually second-order concerns but pop up after
+  large vol moves; production desks track them separately.
+
+A production hedge book would maintain a **vega ladder** keyed by
+strike and tenor and hedge the dominant cells, not just the
+parallel level."""
 )
 
 # ---------------------------------------------------------------------------
 md(
     r"""## 8.4 — Correlation analysis
 
-The 3-asset MC pricer is re-run at the base correlation matrix and at
-shifts of ±0.05 and ±0.10 across **every off-diagonal** of the correlation
-matrix simultaneously. This is the "parallel correlation shift" stress —
-the same number a desk would report as a single-scalar correlation P&L.
-We re-use the existing `price_fcn` engine; nothing about the pricer is
-re-implemented."""
+How sensitive is the FCN's value to changes in pairwise correlation?
+Run the 3-asset MC pricer at the base correlation matrix and at
+shifts of ±0.05 and ±0.10 applied to **every off-diagonal**
+simultaneously. That's the standard "parallel correlation shift"
+stress test desks report as a single-scalar correlation P&L. The
+pricing engine is unchanged from notebook 03; we just re-run it five
+times with different correlation matrices."""
 )
 
 code(
@@ -369,36 +393,57 @@ print(corr_report.narrative)
 )
 
 md(
-    r"""**The desk's situation.** A 5pp rise in pairwise correlation across the
-basket moves FCN value by the amount above. The issuer is on the opposite
-side: a rise in correlation **hurts the holder**, which is a **gain for the
-issuer** (or vice versa, depending on the sign — read the narrative). Either
-way: there is **no liquid hedge product** for single-stock pairwise
-correlation on a 3-name semis basket.
+    r"""**The desk's situation.** A 5-percentage-point rise in pairwise
+correlation across the basket moves FCN value by the amount printed
+above. The dealer is the mirror of the holder: a rise in correlation
+**lifts the structure's value** (good for the long-correlation
+holder, bad for the short-correlation dealer's book), and vice versa
+on a correlation fall.
 
-The closest thing desks use is a **dispersion trade**: long single-stock
-vol vs short index vol on a related index (here, SOXX or SMH). The
-correlation P&L on the FCN doesn't *isolate* cleanly into a dispersion
-strategy, though — the dispersion's covered basket isn't your basket, and
-the correlation structure inside SOXX moves on its own dynamics. So the
-practical answer is: **reserve capital, don't hedge.** The bid–ask on the
-original sale to the client has to cover this."""
+The key fact is: **there is no liquid hedge instrument for
+single-stock pairwise correlation** on a 3-name semis basket. You
+can't go to the exchange and buy "correlation between AMZN and META"
+the way you can buy AMZN vol via a listed option.
+
+The closest workaround desks use is a **dispersion trade**: long
+single-stock vol versus short index vol on a related index (SOXX or
+SMH for a semis basket). The trade captures *average* correlation of
+the index, not the specific 3-name pairwise structure inside this
+FCN, so it's an *approximate* hedge. The correlation structure
+inside SOXX also moves on its own dynamics, adding basis risk.
+
+**Practical answer: reserve capital, don't hedge.** The bid-ask
+spread on the original sale to the client has to be wide enough to
+absorb correlation P&L within whatever realised range the desk's
+capital model says is acceptable. This is exactly the residual that
+shows up in §8.5 below."""
 )
 
 # ---------------------------------------------------------------------------
 md(
     r"""## 8.5 — Unhedgeable risk summary
 
-A single table the trader could put in front of risk management at issuance.
-We compose:
+This is the **one table** a trader would put in front of risk
+management at issuance. It captures the three big risks that
+the day-1 hedge book *can't* cleanly neutralise — the ones the
+bid-ask spread on the original sale has to compensate the desk
+for:
 
-1. The correlation P&L from §8.4.
-2. A gap-risk scenario: overnight jump of every name to its individual
-   knock-in level (the joint worst-case dealer P&L scenario), evaluated by
-   re-running the pricer with bumped spots.
-3. A vol-skew residual: an approximate "vega left over after the parallel
-   hedge", quantified by bumping each name's vol asymmetrically up vs down
-   (a crude skew-twist proxy)."""
+1. **Correlation P&L** — from §8.4 above. Worst-case dollar move
+   from a +5pp parallel shift in pairwise correlation. No clean
+   hedge instrument; reserve capital.
+2. **Gap risk** — an overnight scenario where every name drops to
+   its KI level simultaneously. Tail event, not a daily
+   expectation, but it sizes how much capital the desk should
+   hold against weekend/overnight risk.
+3. **Vol-skew residual** — a proxy for the vega left over after
+   the parallel-shift hedge in §8.3. Constructed by bumping each
+   name's vol asymmetrically (up on one side, down on the other)
+   and reading off the residual P&L the ATM hedge couldn't cover.
+
+Together these three numbers say "if any of these tail moves
+happens, this is the dollar exposure the desk inherits". That
+number sets the **reserve** the trade has to carry."""
 )
 
 code(
@@ -481,70 +526,81 @@ df_summary[['risk', 'metric', 'value', 'p_and_l_5pct', 'pct_of_notional', 'hedge
 )
 
 md(
-    r"""**Reading the table.** These are the components the bid–ask spread on
-the original sale has to compensate for. A few observations the desk would
-want me to note:
+    r"""**Reading the table.** These three numbers — gap, skew, and
+correlation — together are what the bid-ask spread on the original
+sale has to compensate the desk for. A few notes:
 
-* The **gap-risk** number is by construction extreme — a joint overnight
-  jump of all three names to their KI level is a tail scenario, not a
-  daily expectation. It's there to size the reserve, not the daily hedge.
-* The **skew residual** is small relative to gap risk, but it's the one
-  that bleeds out *daily* if not addressed. A vol surface that twists
-  rather than parallel-shifts will cost the desk a few vega per name per
-  day until the listed-option hedge is re-struck.
-* The **correlation P&L** can be either a gain or a loss depending on
-  direction — the desk is short correlation gamma (the issuer's P&L is
-  asymmetric across +ρ vs −ρ moves). The reserve is sized to cover the bad
-  side."""
+- **Gap risk** is by construction extreme. A joint overnight jump
+  of all three names to their KI level is a tail scenario (worst
+  case, not expected), not a daily expectation. It's there to size
+  the **reserve**, not the daily hedge book.
+- **Skew residual** is small relative to gap risk in dollar terms,
+  but it's the one that **bleeds out daily** if not addressed. A
+  vol surface that twists (some strikes move up, others move down)
+  rather than shifts in parallel will cost the desk a few vega
+  worth per name per day until the listed-option hedge is
+  re-struck.
+- **Correlation P&L** can be either a gain or a loss depending on
+  the direction of the correlation move. The dealer is **short
+  correlation gamma**: P&L is asymmetric around ρ moves (much like
+  spot Γ makes Δ moves asymmetric). The reserve is sized to cover
+  the *bad* side of that asymmetry."""
 )
 
 # ---------------------------------------------------------------------------
 md(
     r"""## 8.6 — Hedging frequency and rebalancing (notes)
 
-This section is discussion-only — no computation. Recording the practitioner
-intuition for future-me when I'm trying to explain this in an interview.
+No computation in this section — just practitioner notes on how the
+hedging shown above actually runs *over time*.
 
-**Delta rebalancing.** Most equity-derivatives desks run *intraday* delta
-hedging for large structured books — typically a few times per session,
-more aggressively when any underlying is approaching a barrier. Smaller
-books (or smaller dealers) settle for end-of-day hedging. The trade-off is
-hedge-replication accuracy vs transaction-cost drag: tighter rebalancing
-captures Γ more cleanly but bleeds bid–ask on every cycle. There's no
-universal answer — desks calibrate it to the book's Γ concentration and
-the underlyings' average daily range.
+**Delta rebalancing.** Most equity-derivatives desks run **intraday**
+Δ hedging on large structured books — typically a few times per
+session, more aggressively when any underlying is near a barrier.
+Smaller books or smaller dealers settle for end-of-day hedging. The
+trade-off: tighter rebalancing captures Γ more cleanly but bleeds
+bid-ask on every cycle. No universal answer — desks calibrate the
+rebalance frequency to the book's Γ concentration and the
+underlyings' average daily range.
 
-**Vega rebalancing.** Materially less frequent than delta — weekly to
-monthly is typical for the vega ladder, faster around earnings or vol
-regime shifts. The desk's listed-option hedges *do* age (their vegas
-decay as their expiries approach), so the hedge book also has to be
-re-rolled, typically by selling the front-month and buying the next
-quarter, harvesting calendar spread along the way.
+**Vega rebalancing.** Materially less frequent than Δ — weekly to
+monthly is typical for the vega ladder, with faster cycles around
+earnings or vol regime shifts. The listed-option hedges themselves
+age (their vegas decay as expiries approach), so the hedge book has
+to be **re-rolled**: typically by selling the front-month options
+and buying the next quarter, harvesting a small calendar spread
+along the way.
 
-**Barrier events.** When any underlying gets within a few percent of an
-autocall or KI level the hedge dynamics get *weird*. Specifically:
+**Barrier events.** When any underlying drifts within a few percent
+of an autocall or KI level, the hedge dynamics get weird:
 
-* Γ spikes (notebook 08 makes this visible). Δ rebalancing demands shrink
-  the rebalancing interval.
-* **Gap risk** over weekends or overnight is real. The standard mitigation
-  is a "barrier shift" convention — for hedging purposes the desk treats
-  the effective barrier as *slightly inside* the contractual barrier
-  (e.g. 0.71 instead of 0.70 for the KI), which builds in a small safety
-  buffer at the cost of a small Δ-hedge bias when the spot is far away.
-  This is a well-known desk fudge that's documented in the model approval
-  but doesn't show up in the marketing material.
+- **Γ spikes** (notebook 08 makes this visible). Δ rebalancing
+  demands shrink: where you might rebalance Δ a few times a day
+  normally, near a barrier you might do it every hour.
+- **Gap risk** over weekends or overnight is real. The standard
+  mitigation is a **barrier shift** convention — for hedging
+  purposes the desk treats the effective barrier as *slightly
+  inside* the contractual one (e.g. 0.71 instead of 0.70 for the
+  KI). That builds in a small safety buffer at the cost of a small
+  Δ-hedge bias when the spot is far away. It's a well-known desk
+  fudge that's documented in the model approval but doesn't appear
+  in the marketing material.
 
-**Theta is the bank's compensation.** Day after day, with nothing else
-moving, the FCN's PV drifts: the autocall feature accretes towards a
-known terminal payoff, and (more importantly) the *implied* hedge cost
-the desk has to bear keeps the bid–ask wide. The integral of theta over
-the lifetime of the trade, less the actual cost of running the dynamic
-hedge, less the unhedgeable residual reserves, is what the desk earns.
-If the desk does its job well, the realised cost of the dynamic hedge
-comes in *below* the theta budget, and the difference is the trade's
-P&L. If it doesn't (large gaps, vol-of-vol blow-ups, model errors near
-barriers), it doesn't — and that's the trade that ends up in the
-post-mortem deck."""
+**Theta is the bank's compensation.** Day after day, with markets
+quiet, the FCN's PV drifts in a predictable way — the autocall
+feature accretes toward a known terminal payoff. More importantly,
+the *expected* hedging cost the desk would have to bear keeps the
+bid-ask spread wide. The integral of theta over the trade's life,
+**less** the realised cost of running the dynamic hedge, **less**
+the reserves consumed by unhedgeable residuals, is what the desk
+earns on the trade.
+
+If the desk does its job well — tight Δ hedging, well-sized vega
+hedge, no large gaps — the realised hedge cost comes in *below* the
+theta budget, and the difference is the trade's P&L. If it doesn't
+(big overnight gaps, vol-of-vol blow-ups, model errors near the
+barriers), it doesn't, and that trade ends up in the post-mortem
+deck."""
 )
 
 # ---------------------------------------------------------------------------
