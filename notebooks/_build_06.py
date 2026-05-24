@@ -25,6 +25,8 @@ def code(text: str) -> None:
 md(
     r"""# 06 — Variance reduction: worst-of European put control variate
 
+> **Frame:** Greeks here are from the **investor's** perspective (∂PV/∂input, investor long the structure). The dashboard's Hedging tab flips to the dealer's side; the rest of the dashboard and notebooks 03-08 stay on investor side.
+
 Antithetic variates already gave us a ~$\sqrt{2}\times$ tighter MC
 standard error essentially for free (we used antithetic in notebooks
 03-05). To go further we add a **control variate**: a second instrument

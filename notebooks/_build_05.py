@@ -25,6 +25,8 @@ def code(text: str) -> None:
 md(
     r"""# 05 — Greeks: bump-and-revalue MC vs off-grid PDE
 
+> **Frame:** Greeks here are from the **investor's** perspective (∂PV/∂input, investor long the structure). The dashboard's Hedging tab flips to the dealer's side; the rest of the dashboard and notebooks 03-08 stay on investor side.
+
 This notebook computes the FCN's Greeks — Δ (spot sensitivity), Γ
 (curvature), vega (vol sensitivity), and pairwise cega (correlation
 sensitivity) — using two engines, and checks they agree.

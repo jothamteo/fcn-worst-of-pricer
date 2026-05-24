@@ -30,11 +30,13 @@ def _format_pnl(x: float) -> str:
 
 
 def render() -> None:
-    st.subheader("Hedging")
+    st.subheader("Hedging (dealer view)")
     st.caption(
-        "Issuer-side hedge ratios derived from the current Greeks. Numbers "
-        "assume the dealer is the seller of the FCN; sign conventions follow "
-        "`src.hedging`."
+        "**Dealer-side hedge ratios.** This panel flips the investor-side "
+        "Greeks shown elsewhere on the dashboard to the dealer's mirror — "
+        "the dealer sold the FCN to the client, is short the structure, and "
+        "needs to hedge the opposite of every exposure shown in the P&L and "
+        "Greeks tabs. Sign conventions follow `src.hedging`."
     )
 
     current = st.session_state["current"]

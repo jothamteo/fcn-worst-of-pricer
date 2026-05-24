@@ -29,6 +29,8 @@ def code(text: str) -> None:
 md(
     r"""# 07 — Summary
 
+> **Frame:** Greeks here are from the **investor's** perspective (∂PV/∂input, investor long the structure). The dashboard's Hedging tab flips to the dealer's side; the rest of the dashboard and notebooks 03-08 stay on investor side.
+
 This is the headline notebook — a single-screen view of what the
 pricer produces for a hypothetical worst-of FCN on AMZN, META and MU.
 No exploration; no build-up. Just the things a structured-products

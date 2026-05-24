@@ -25,6 +25,8 @@ def code(text: str) -> None:
 md(
     r"""# 08 — Smoothed-payoff Greeks (the production-desk fix)
 
+> **Frame:** Greeks here are from the **investor's** perspective (∂PV/∂input, investor long the structure). The dashboard's Hedging tab flips to the dealer's side; the rest of the dashboard and notebooks 03-08 stay on investor side.
+
 Notebook 05 left us with an honest finding: bump-and-revalue MC Greeks
 get noisy near the autocall and knock-in barriers, while the PDE Δ
 stays smooth. This notebook fixes it.
