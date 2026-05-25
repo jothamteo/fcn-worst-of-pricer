@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from dashboard.engine import get_full_state
+from dashboard.engine import get_full_state, get_pricing
 from dashboard.pnl_attribution import attribute
 from src.hedging import (
     black_scholes_call,
@@ -187,11 +187,17 @@ def render() -> None:
         st.info("Initial Greeks not yet computed — visit the P&L tab once.")
         return
 
+    # Use ``get_pricing`` (grid in Fast mode, MC in Precise) so the §4 P&L
+    # numbers reconcile to the P&L tab's waterfall. ``state["price"]`` is a
+    # live precise-MC reval that disagrees with the grid by ~$300 of MC noise
+    # — that noise would show up here as an "unexplained" P&L that doesn't
+    # match any waterfall bar.
+    current_price_for_attr = float(get_pricing(current)["price"])
     pnl = attribute(
         initial=initial,
         current=current,
         initial_price=float(init_state["price"]),
-        current_price=float(state["price"]),
+        current_price=current_price_for_attr,
         initial_delta=np.asarray(init_state["delta"]),
         initial_vega=np.asarray(init_state["vega"]),
         initial_cega_pair=np.asarray(init_state["cega_pair"]),
