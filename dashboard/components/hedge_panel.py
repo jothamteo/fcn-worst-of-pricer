@@ -172,13 +172,14 @@ def render() -> None:
     st.caption(report.narrative)
 
     # -----------------------------------------------------------------------
-    # What-if hedged P&L
+    # What-if hedged P&L (dealer side)
     # -----------------------------------------------------------------------
-    st.markdown("### 4) What-if hedged P&L")
+    st.markdown("### 4) What-if hedged P&L (dealer view)")
     st.caption(
-        "Side-by-side: the unhedged FCN P&L (from the P&L panel) vs the same "
-        "P&L net of a static delta hedge sized at issue. The point of the "
-        "comparison is that the spot bucket should largely cancel."
+        "Dealer-side P&L since issue: the unhedged FCN leg (mirror of the "
+        "investor's MTM from the P&L tab) vs the same P&L net of a static "
+        "delta hedge sized at issue. The spot bucket should largely cancel — "
+        "the residual is the un-hedgeable bucket the desk runs against."
     )
     initial = st.session_state["initial"]
     init_state = st.session_state.get("initial_full_state")
@@ -195,18 +196,24 @@ def render() -> None:
         initial_vega=np.asarray(init_state["vega"]),
         initial_cega_pair=np.asarray(init_state["cega_pair"]),
     )
-    # Static day-1 delta hedge: dealer holds Δ(initial) shares per name.
-    # Hedge P&L = Σ Δᵢ(initial) · (S_i_current − S_i_initial)   on the dealer side.
-    # From holder's perspective this *adds* the same amount, so the residual
-    # spot exposure is zero modulo Γ.
-    spot_hedge_pnl = -float(pnl.spot_pnl)        # dealer pockets the holder's spot move
-    hedged_total = pnl.total_pnl + spot_hedge_pnl
+    # Static day-1 delta hedge from the dealer's side. The dealer is short
+    # the FCN to the client and holds Δᵢ(initial) shares per name against
+    # it. When spot moves by ΔSᵢ:
+    #     FCN leg    = -investor.total_pnl   (mirror of holder's MTM)
+    #     Hedge leg  = +Σ Δᵢ(initial)·ΔSᵢ  =  +investor.spot_pnl
+    # Net residual is the un-hedgeable bucket (Γ + θ + vol + corr), dealer side.
+    unhedged_dealer = -float(pnl.total_pnl)
+    spot_hedge_pnl = float(pnl.spot_pnl)
+    hedged_total = unhedged_dealer + spot_hedge_pnl
 
     cu1, cu2, cu3 = st.columns(3)
     cu1.metric(
-        "Unhedged P&L",
-        _format_pnl(pnl.total_pnl),
-        help="Total MTM move since issue (from the P&L tab).",
+        "Unhedged P&L (dealer)",
+        _format_pnl(unhedged_dealer),
+        help=(
+            "Dealer's mirror of the FCN's MTM move since issue — sign-flipped "
+            "from the investor P&L shown in the P&L tab."
+        ),
     )
     cu2.metric(
         "Static delta hedge P&L",
@@ -217,8 +224,8 @@ def render() -> None:
         "Net after hedge",
         _format_pnl(hedged_total),
         help=(
-            "Sum of the two above. Should be close to the FCN's residual "
-            "(Γ + θ + vol + corr) — i.e. the un-hedgeable bucket."
+            "Sum of the two above — dealer's residual (Γ + θ + vol + corr). "
+            "This is the un-hedgeable bucket the desk runs against."
         ),
     )
 
