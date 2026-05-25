@@ -16,6 +16,7 @@ import streamlit as st
 from dashboard.engine import get_full_state, get_pricing
 from dashboard.pnl_attribution import attribute
 from src.hedging import (
+    CorrelationRiskReport,
     black_scholes_call,
     compute_correlation_risk,
     compute_delta_hedge,
@@ -127,39 +128,73 @@ def render() -> None:
     )
 
     # -----------------------------------------------------------------------
-    # Correlation risk
+    # Correlation risk (dealer view)
     # -----------------------------------------------------------------------
-    st.markdown("### 3) Correlation risk")
-    # Average pairwise cega → desk-level corr sensitivity.
+    st.markdown("### 3) Correlation risk (dealer view)")
+    # Basket-wide pairwise cega: a +1% parallel shift in every pairwise ρ
+    # changes the FCN's MTM by Σᵢ<ⱼ cega_ij. The previous version averaged
+    # the pairwise cegas, which understated the parallel-shift sensitivity
+    # by a factor of n_pairs (3× for a 3-name basket). The P&L tab's
+    # waterfall correctly sums; this panel must match.
     d = cega_pair.shape[0]
-    cega_total = 0.0
+    cega_sum_investor = 0.0
     n_pairs = 0
     for i in range(d):
         for j in range(i + 1, d):
-            cega_total += float(cega_pair[i, j])
+            cega_sum_investor += float(cega_pair[i, j])
             n_pairs += 1
-    cega_avg = cega_total / max(n_pairs, 1)
 
-    # Build a tiny price-at-corr-levels scan from the cega slope.
+    # Build the price scan around the basket-wide sum so the finite-
+    # difference inside compute_correlation_risk recovers the basket
+    # sensitivity, not the per-pair average. compute_correlation_risk
+    # reports investor-side numbers; we display the dealer's mirror.
     base_price = float(state["price"])
     price_at_levels = {
-        -0.10: base_price + (-0.10) * 100 * cega_avg,
-        -0.05: base_price + (-0.05) * 100 * cega_avg,
+        -0.10: base_price + (-0.10) * 100 * cega_sum_investor,
+        -0.05: base_price + (-0.05) * 100 * cega_sum_investor,
          0.00: base_price,
-         0.05: base_price + ( 0.05) * 100 * cega_avg,
-         0.10: base_price + ( 0.10) * 100 * cega_avg,
+         0.05: base_price + ( 0.05) * 100 * cega_sum_investor,
+         0.10: base_price + ( 0.10) * 100 * cega_sum_investor,
     }
-    report = compute_correlation_risk(price_at_corr_levels=price_at_levels)
+    report_investor = compute_correlation_risk(price_at_corr_levels=price_at_levels)
+    cega_dealer = -float(report_investor.cega)
+    pnl_5pct_dealer = -float(report_investor.correlation_pnl_per_5pct_move)
+    direction = "long" if cega_dealer > 0 else "short"
+    outcome = "gain" if pnl_5pct_dealer > 0 else "loss"
+    dealer_narrative = (
+        f"The dealer is {direction} correlation. A +5 percentage-point "
+        f"parallel rise in pairwise ρ across the basket would be a "
+        f"{outcome} of ${abs(pnl_5pct_dealer):,.0f} (≈ basket cega × 5). "
+        f"No liquid single-stock correlation product covers a generic 3-"
+        f"name basket, so the desk reserves capital against this risk."
+    )
+    # Dealer-mirrored report flows into the §5 un-hedgeable risks table so
+    # the whole Hedging tab presents one convention.
+    report = CorrelationRiskReport(
+        cega=cega_dealer,
+        correlation_pnl_per_5pct_move=pnl_5pct_dealer,
+        base_price=report_investor.base_price,
+        hedgeable=report_investor.hedgeable,
+        narrative=dealer_narrative,
+        samples=report_investor.samples,
+    )
     c1, c2, c3 = st.columns(3)
     c1.metric(
-        "cega (per +0.01)",
-        f"${report.cega:,.0f}",
-        help="Average pairwise correlation sensitivity across the basket.",
+        "cega (per +0.01, dealer)",
+        f"${cega_dealer:,.0f}",
+        help=(
+            f"Basket-wide pairwise correlation sensitivity from the "
+            f"dealer's side — sum of {n_pairs} pairwise cegas, sign-"
+            f"flipped from the holder."
+        ),
     )
     c2.metric(
-        "P&L per +5% in ρ",
-        f"${report.correlation_pnl_per_5pct_move:,.0f}",
-        help="Linear extrapolation of cega across a 5 percentage-point parallel ρ rise.",
+        "P&L per +5% in ρ (dealer)",
+        f"${pnl_5pct_dealer:,.0f}",
+        help=(
+            "Linear extrapolation of basket cega across a 5 percentage-"
+            "point parallel ρ rise — dealer side."
+        ),
     )
     c3.metric(
         "Hedgeable?",
@@ -169,7 +204,7 @@ def render() -> None:
             "3-name basket. See `HEDGING_NOTES.md` for the desk-level mitigants."
         ),
     )
-    st.caption(report.narrative)
+    st.caption(dealer_narrative)
 
     # -----------------------------------------------------------------------
     # What-if hedged P&L (dealer side)
